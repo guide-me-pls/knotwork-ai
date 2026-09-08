@@ -22,8 +22,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
-    "@types/node": "22.15.3",
+    "@types/node": "^22.20.1",
     "@yao-pkg/pkg": "^6.21.0",
+    "esbuild": "^0.25.9",
     "typescript": "5.8.3"
   },
   "dependencies": {

@@ -3,15 +3,25 @@ import { randomUUID } from "node:crypto";
 import type { RiskClass } from "./contracts.ts";
 
 /**
- * Risk-classified tool authorization, independent of any agent loop.
+ * Risk-classified tool authorization for in-process tools, independent of any
+ * agent loop.
+ *
+ * Production workers are black-box CLIs (`src/workers/black-box-cli-worker.ts`).
+ * Their inner tools are invisible to the Kernel, so this module is not wired
+ * onto that path and must not be described as if it were. Keep it for a future
+ * in-process tool surface; do not pretend the CLI workers run through it.
+ *
+ * 面向进程内 Tool 的、与任何 Agent Loop 无关的按风险分级授权层。
+ *
+ * 生产路径上的 Worker 是黑盒 CLI（`src/workers/black-box-cli-worker.ts`）。它们内部的
+ * Tool 对 Kernel 不可见，因此本模块没有接到那条路上，文档也不得写成好像接上了。留给
+ * 将来的进程内工具面；不要假装 CLI Worker 会经过这里。
  *
  * This is the layer that decides whether a tool may run at all, times it out,
  * cancels it by a stable id, and answers the only question that matters after
  * a crash: did this operation already take effect? Reads may be replayed
  * freely; anything that touched the outside world needs an explicit answer
  * rather than an optimistic guess.
- *
- * 与任何 Agent Loop 无关的、按风险分级的 Tool 授权层。
  *
  * 这一层决定某个 Tool 是否允许运行、限制其执行时间、按稳定 ID 取消它，并回答崩溃后唯一
  * 重要的问题：这次操作是否已经生效？读取可以自由重放；任何触碰外部世界的操作都需要一个

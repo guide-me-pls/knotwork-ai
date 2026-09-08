@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { startCompanionServer } from "../src/companion-server.ts";
+import { companionFetch } from "./helpers/companion-api.ts";
 
 // The conversation-driven entry exists and validates input without touching a
 // model; the full chain is covered by the gated live acceptance test.
@@ -22,7 +23,7 @@ test("the companion main-agent route rejects an empty request before any model c
     await rm(dataDirectory, { recursive: true, force: true });
   });
 
-  const rejected = await fetch(`${server.url}/api/main-agent/query`, {
+  const rejected = await companionFetch(server.url, server.token, "/api/main-agent/query", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text: "  " }),

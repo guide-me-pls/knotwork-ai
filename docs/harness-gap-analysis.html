@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>clone-ai · Harness 成熟度差距分析</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --paper: #fffdf8;
+      --ink: #1c1915;
+      --muted: #5c564c;
+      --line: #e4ddd0;
+      --accent: #8b3a2a;
+      --present: #1f6b45;
+      --partial: #9a6b12;
+      --absent: #9b2c2c;
+      --p0: #9b2c2c;
+      --p1: #9a6b12;
+      --p2: #3d5a80;
+      --chip: #efe8dc;
+      --shadow: 0 1px 0 rgba(28, 25, 21, 0.04);
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sans: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+      --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161410;
+        --paper: #1e1a16;
+        --ink: #f3eee6;
+        --muted: #b7afa3;
+        --line: #3a342c;
+        --accent: #e08a78;
+        --present: #6ec99a;
+        --partial: #e0b45a;
+        --absent: #ee7a7a;
+        --p0: #ee7a7a;
+        --p1: #e0b45a;
+        --p2: #8bb4d9;
+        --chip: #2a251f;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--ui);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    a { color: var(--accent); }
+    header.hero {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 3.2rem 1.5rem 1.5rem;
+    }
+    .kicker {
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    h1 {
+      font-family: var(--sans);
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      line-height: 1.2;
+      margin: 0.4rem 0 0.8rem;
+      letter-spacing: -0.02em;
+    }
+    .lede {
+      font-size: 1.12rem;
+      color: var(--muted);
+      max-width: 46rem;
+      margin: 0;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.2rem;
+      margin-top: 1.2rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    nav.toc {
+      max-width: 1080px;
+      margin: 0 auto 1.5rem;
+      padding: 0 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 1rem;
+      font-size: 0.85rem;
+    }
+    nav.toc a { text-decoration: none; border-bottom: 1px solid var(--line); }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 1.5rem 5rem;
+    }
+    section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.6rem 1.7rem 1.8rem;
+      margin-bottom: 1.1rem;
+      box-shadow: var(--shadow);
+    }
+    h2 {
+      font-family: var(--sans);
+      font-size: 1.35rem;
+      margin: 0 0 0.9rem;
+      letter-spacing: -0.02em;
+    }
+    h3 {
+      font-size: 1.05rem;
+      margin: 1.3rem 0 0.45rem;
+    }
+    p { margin: 0.55rem 0; }
+    ul, ol { margin: 0.4rem 0 0.2rem; padding-left: 1.25rem; }
+    li { margin: 0.25rem 0; }
+    .verdict {
+      border-left: 4px solid var(--accent);
+      padding: 0.2rem 0 0.2rem 1rem;
+      margin: 0.8rem 0 0;
+    }
+    .grid-13 {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.7rem;
+    }
+    .score {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.7rem 0.8rem 0.8rem;
+    }
+    .score .name { font-size: 0.82rem; font-weight: 600; }
+    .bar {
+      height: 6px;
+      background: var(--chip);
+      border-radius: 99px;
+      margin: 0.45rem 0 0.35rem;
+      overflow: hidden;
+    }
+    .bar > i { display: block; height: 100%; border-radius: 99px; }
+    .bar.present > i { width: 88%; background: var(--present); }
+    .bar.partial > i { width: 48%; background: var(--partial); }
+    .bar.absent > i { width: 12%; background: var(--absent); }
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.12rem 0.4rem;
+      border-radius: 4px;
+    }
+    .badge.present { color: var(--present); background: color-mix(in srgb, var(--present) 14%, transparent); }
+    .badge.partial { color: var(--partial); background: color-mix(in srgb, var(--partial) 16%, transparent); }
+    .badge.absent { color: var(--absent); background: color-mix(in srgb, var(--absent) 14%, transparent); }
+    .badge.p0 { color: var(--p0); background: color-mix(in srgb, var(--p0) 14%, transparent); }
+    .badge.p1 { color: var(--p1); background: color-mix(in srgb, var(--p1) 16%, transparent); }
+    .badge.p2 { color: var(--p2); background: color-mix(in srgb, var(--p2) 16%, transparent); }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.7rem;
+      margin: 1rem 0;
+    }
+    .stat {
+      background: var(--chip);
+      border-radius: 8px;
+      padding: 0.7rem 0.8rem;
+    }
+    .stat b { display: block; font-size: 1.25rem; font-family: var(--sans); }
+    .stat span { font-size: 0.78rem; color: var(--muted); }
+    .layers {
+      display: grid;
+      gap: 0.45rem;
+      margin: 1rem 0;
+    }
+    .layer {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.7rem 0.9rem;
+    }
+    .layer .who { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    .layer .what { font-weight: 650; }
+    .layer .gap { font-size: 0.85rem; color: var(--muted); margin-top: 0.15rem; }
+    .layer.g0 { border-left: 4px solid var(--p0); }
+    .layer.g1 { border-left: 4px solid var(--p1); }
+    .layer.g2 { border-left: 4px solid var(--p2); }
+    .layer.ok { border-left: 4px solid var(--present); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      margin: 0.6rem 0;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0.5rem 0.55rem;
+      border-bottom: 1px solid var(--line);
+    }
+    th { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    code, .cite {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: var(--chip);
+      padding: 0.05em 0.35em;
+      border-radius: 4px;
+    }
+    .dim {
+      border-top: 1px solid var(--line);
+      padding-top: 1.1rem;
+      margin-top: 1.1rem;
+    }
+    .dim:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+    .dim-head {
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+    }
+    .dim-head h3 { margin: 0; }
+    .cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 760px) {
+      .cols { grid-template-columns: 1fr; }
+      section { padding: 1.2rem 1rem 1.3rem; }
+    }
+    footer {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 1.5rem 3rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    @media print {
+      body { background: white; color: black; font-size: 11pt; }
+      header.hero, main, footer { max-width: none; }
+      section {
+        background: white;
+        border: 1px solid #ccc;
+        break-inside: avoid;
+        box-shadow: none;
+      }
+      nav.toc { display: none; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="kicker">clone-ai · audit · 2026-09-08</div>
+    <h1>作为一个成熟的 harness agent，还缺什么</h1>
+    <p class="lede">
+      clone-ai 已经是一个认真的本地 Kernel：Journal 是真相，Worker 是黑盒，完成由证据决定。
+      它还不是一个可交付的 harness——控制面有洞，预算半真半假，隔离停在提示词，观测停在 <code>console.error</code>。
+    </p>
+    <div class="meta">
+      <span>审计范围：<code>src/</code> 14,842 行 · <code>test/</code> 7,166 行 · UI 1,063 行</span>
+      <span>对照：Cursor / Claude Code / Codex 一类成熟 harness 的控制面，而不是聊天机器人清单</span>
+      <span>方法：读源码与测试，不跑 live 模型</span>
+    </div>
+  </header>
+
+  <nav class="toc">
+    <a href="#scorecard">评分卡</a>
+    <a href="#profile">项目画像</a>
+    <a href="#solid">已经很强</a>
+    <a href="#gaps">13 个差距</a>
+    <a href="#roadmap">P0 / P1 / P2</a>
+    <a href="#readme">README vs 代码</a>
+    <a href="#bugs">顺手发现的 bug</a>
+    <a href="#appendix">附录</a>
+  </nav>
+
+  <main>
+    <section id="scorecard">
+      <h2>一句话结论</h2>
+      <div class="verdict">
+        <p>
+          把 clone-ai 当成「个人数字分身的 Kernel 骨架」是准确的；把它当成成熟 harness 会高估。
+          Kernel 的权威边界（提案 / 审批 / 证据 / 崩溃裁决）已经写进代码，而且有 kill-restart 测试托底。
+          缺的是 harness 把这些边界变成<strong>可操作、可观测、可隔离、可取消</strong>的控制面。
+          最危险的缺口不在模型，而在 loopback HTTP：本机任意进程可以批准 Run、全局安装 CLI。
+        </p>
+      </div>
+      <h3>13 个维度</h3>
+      <div class="grid-13">
+        <div class="score"><div class="name">1. Agent Loop 控制</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">2. Tool 层</div><div class="bar absent"><i></i></div><span class="badge absent">absent*</span></div>
+        <div class="score"><div class="name">3. 沙箱隔离</div><div class="bar absent"><i></i></div><span class="badge absent">absent</span></div>
+        <div class="score"><div class="name">4. 策略与授权</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">5. 验证与证据</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">6. 记忆与上下文</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">7. 模型层</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">8. 可观测性</div><div class="bar absent"><i></i></div><span class="badge absent">absent</span></div>
+        <div class="score"><div class="name">9. 可靠性与运维</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">10. 安全</div><div class="bar absent"><i></i></div><span class="badge absent">absent*</span></div>
+        <div class="score"><div class="name">11. 评估与质量门禁</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">12. 连接器与扩展</div><div class="bar partial"><i></i></div><span class="badge partial">partial</span></div>
+        <div class="score"><div class="name">13. 产品与分发</div><div class="bar absent"><i></i></div><span class="badge absent">absent</span></div>
+      </div>
+      <p style="font-size:0.85rem;color:var(--muted);margin-top:0.8rem;">
+        * Tool 层：<code>ToolAuthority</code> 代码完整，但生产路径零引用。<br>
+        * 安全：默认绑 <code>127.0.0.1</code>，但无 token、无 Origin 校验，共享机器或 DNS rebinding 即可调用审批与安装接口。
+      </p>
+    </section>
+
+    <section id="profile">
+      <h2>项目画像</h2>
+      <div class="stats">
+        <div class="stat"><b>0.1.0</b><span>package / Tauri 版本</span></div>
+        <div class="stat"><b>14.8k</b><span>src TypeScript 行</span></div>
+        <div class="stat"><b>43</b><span>test 文件（3 个 live）</span></div>
+        <div class="stat"><b>8</b><span>Main Agent 提案型工具</span></div>
+        <div class="stat"><b>4</b><span>内置 Worker 配方</span></div>
+        <div class="stat"><b>0</b><span>CI workflow / lint / coverage</span></div>
+      </div>
+      <p>
+        运行时分层故意把「大脑」和「权威」拆开。Main Agent 跑在
+        <code>@earendil-works/pi-coding-agent</code> 上，只能提案；Kernel 拥有 Journal、策略、验证和完成判定；
+        Claude Code / Codex / Pi / opencode 作为黑盒 CLI 被 <code>spawn</code>，成功与否看 workspace 差分，不看它们说了什么。
+      </p>
+      <div class="layers">
+        <div class="layer g0">
+          <div class="who">Owner · CLI / Tauri GUI</div>
+          <div class="what">对话、审批、记忆治理、机会卡</div>
+          <div class="gap">缺口：无 cancel / reject 入口；UI 中文硬编码；无托盘与通知</div>
+        </div>
+        <div class="layer g0">
+          <div class="who">companion-server · loopback HTTP + SSE</div>
+          <div class="what"><code>127.0.0.1:4317</code> · 30+ API · <code>/api/main-agent/stream</code></div>
+          <div class="gap">缺口：无鉴权、无 Origin、无 rate limit、无 <code>/health</code>、无 SIGTERM（仅 sidecar 有）</div>
+        </div>
+        <div class="layer g1">
+          <div class="who">Main Agent · Pi SDK</div>
+          <div class="what">8 个 Kernel 工具 · charter + situation briefing · 会话落在 clone home</div>
+          <div class="gap">缺口：迭代上限 / token 预算 / 会话互斥都在 SDK 里，仓库看不见也管不住</div>
+        </div>
+        <div class="layer ok">
+          <div class="who">Kernel · CloneRuntime</div>
+          <div class="what">Journal / Policy / Verifier / claim-lease / 崩溃裁决 / 记忆管道</div>
+          <div class="gap">已强：append-only 事件、风险下限、跨 Provider 失败印证。半真：预算字段、ToolAuthority</div>
+        </div>
+        <div class="layer g1">
+          <div class="who">BlackBoxCliWorker</div>
+          <div class="what">claude / codex / pi / opencode · 环境白名单 · 进程树终止 · 硬截止</div>
+          <div class="gap">缺口：无容器沙箱；checkpoint 只有 hash 不能回滚；maxModelCalls 不执行</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="solid">
+      <h2>已经很强的部分</h2>
+      <p>成熟 harness 的内核契约，clone-ai 大部分已经写对了。差距分析不该假装这些不存在。</p>
+      <ul>
+        <li><strong>权威边界清楚。</strong> Main Agent 禁用内置 file/shell 工具（<code>session.ts:108</code>），<code>propose_work_plan</code> 只创建 Run；完成、审批、记忆提升都在 Kernel。</li>
+        <li><strong>Journal 是真相。</strong> SQLite WAL + <code>synchronous=FULL</code>（<code>sqlite-journal.ts:26-27</code>），事件可重放；claim 是可变所有权行，不是事件。</li>
+        <li><strong>崩溃故事完整。</strong> lease 过期才回收孤儿 Run（<code>runtime.ts:213-257</code>）；可逆工作回队列，外部/不可逆/验证中途失败而不是重放副作用。队列每 tick 调用 <code>recoverOrphanedRuns</code>（<code>run-queue.ts:112-113</code>）。</li>
+        <li><strong>黑盒边界诚实。</strong> 不解析 Provider 协议；exit 0 不算交付；合同要求产物而 workspace 未变就是 <code>no_artifact</code>（<code>black-box-cli-worker.ts:275-281</code>）。Worker 不能记录 <code>receipt</code>（<code>:104</code>）。</li>
+        <li><strong>计划合同严格。</strong> 未知 executor 在提案时拒绝（<code>runtime.ts:1304-1308</code>）；风险下限由 capabilities 重算（<code>:1507-1522</code>）；子单风险不可高于父步骤（<code>:1375-1379</code>）；external/irreversible 强制 <code>maxAttempts=1</code>（<code>:1408-1414</code>）。</li>
+        <li><strong>机械规则，不只是提示词。</strong> <code>record_state</code> / <code>install_agent</code> 用 <code>ownerStated</code> 核对所有者原话（<code>kernel-tools.ts:198-210</code>、<code>:268-281</code>）。记忆进入 Worker 前必须有 <code>memory.recalled</code> 审计事件。</li>
+        <li><strong>测试不是摆设。</strong> 43 个 <code>node:test</code> 文件覆盖 journal 不变量、kill-restart、workspace lease、黑盒超时、记忆治理、golden-path。TypeScript <code>strict: true</code>。</li>
+      </ul>
+    </section>
+
+    <section id="gaps">
+      <h2>13 个差距维度</h2>
+      <p>每条给出状态、证据、影响，以及建议接到<strong>已经存在的 seam</strong>上，而不是另起炉灶。</p>
+
+      <article class="dim">
+        <div class="dim-head"><h3>1. Agent Loop 控制</h3><span class="badge partial">partial</span></div>
+        <p>
+          Main Agent 的多步 LLM ↔ tool 循环完全在 Pi SDK 内。仓库只做一次 <code>session.prompt(query)</code>
+          （<code>clone-main.ts:46</code>、<code>run-main-query.ts:55</code>）。没有 <code>maxIterations</code>、没有 token 预算、没有 AbortSignal。
+        </p>
+        <p>
+          <code>WorkOrderBudget.maxModelCalls</code> / <code>maxToolCalls</code> 在 <code>assertBudget</code> 里校验必须是正整数
+          （<code>runtime.ts:1458-1471</code>），黑盒 Worker 只执行 <code>maxDurationMs</code>（进程杀树）和 Runtime 的 <code>maxAttempts</code>。模型调用次数是装饰字段。
+        </p>
+        <p>
+          <code>runMainAgentQuery</code> 无互斥。companion 的 SSE 与 CLI 可以对同一 <code>pi-sessions/main-agent</code> 指针并发 <code>prompt</code>，SDK 会话文件没有 harness 级锁。
+        </p>
+        <p><strong>接到哪里：</strong> 在 <code>createMainAgentSession</code> 外包一层 turn/budget 计数；给 <code>runMainAgentQuery</code> 加文件锁或队列；要么在黑盒边界统计调用，要么删掉那两个预算字段，避免合同骗人。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>2. Tool 层</h3><span class="badge absent">absent in prod</span></div>
+        <p>
+          <code>src/core/tool-authority.ts</code> 是一套完整的按风险授权、超时、按 <code>operationId</code> 取消、崩溃后 <code>reconcile</code> 的工具运行时。
+          全仓库唯一引用是 <code>test/tool-authority.test.ts</code>。生产路径里 Worker 的工具对 Kernel 不可见。
+        </p>
+        <p>
+          没有 MCP 宿主。没有工具结果截断（<code>search_history</code> 有 8k 上限，工具 JSON 原样返回）。
+          黑盒的「不要做网络/支付/破坏性动作」写在 Prompt 里（<code>black-box-cli-worker.ts:307-309</code>），是劝告，不是闸门。
+        </p>
+        <p><strong>接到哪里：</strong> 两条路选一条并写进架构：要么承认黑盒、删除或降级 <code>ToolAuthority</code> 以免文档撒谎；要么让可治理的本地工具走 <code>ToolAuthority</code>，CLI Worker 继续黑盒。不要两套故事并存。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>3. 沙箱隔离</h3><span class="badge absent">absent</span></div>
+        <p>
+          Worker 在所有者真实 workspace 上 <code>spawn</code>（<code>black-box-cli-worker.ts:142-150</code>）。隔离只有：空环境 + 配方白名单（<code>:447-475</code>）、Windows 解析 <code>.cmd</code> 避免 shell 注入（<code>:492-519</code>）、硬截止杀进程树。
+        </p>
+        <p>
+          Checkpoint 是「相对路径 → 内容 hash」的 JSON（<code>workspace-evidence.ts:9</code>）。恢复可以 <code>rerun / reconciled / blocked</code>，不能把文件倒回去。没有 worktree、没有容器、没有 seccomp、没有 dry-run。
+        </p>
+        <p><strong>接到哪里：</strong> 先给危险步骤一个 git worktree 或临时副本，把 <code>JsonWorkspaceCheckpointStore</code> 从 hash 索引升级为可还原快照；容器是下一档，不是第一档。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>4. 策略与授权</h3><span class="badge partial">partial</span></div>
+        <p>
+          <code>DefaultPolicyEngine</code> 27 行（<code>policy.ts:11-26</code>）：可逆允许，external/irreversible 要审批，已批准则放行。
+          README 的自主性阶梯 0–4、常设授权、预算/隐私策略都不存在。
+          <code>ApprovalGrant.grantedBy</code> 类型包含 <code>"standing_policy"</code>（<code>contracts.ts:166</code>），默认引擎从不走这条路。
+        </p>
+        <p>
+          有 <code>POST /api/runs/:id/approve</code>（<code>companion-server.ts:813</code>），没有 reject。
+          <code>waiting_approval</code> 会永远挂着。<code>CloneRuntime.cancel()</code> 存在（<code>runtime.ts:425-456</code>），HTTP 与 CLI 都没有入口。
+        </p>
+        <p><strong>接到哪里：</strong> <code>POST /api/runs/:id/cancel</code> 和 <code>.../reject</code> 直接调已有方法；CLI 补 <code>clone-ai approve|reject|cancel|trace</code>（README 已经把它们写成计划命令）。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>5. 验证与证据</h3><span class="badge partial">partial</span></div>
+        <p>
+          <code>EvidenceVerifier</code> 用正则从步骤自然语言里抠文件路径和「包含 / contains」子串（<code>verification.ts:38-71</code>）。
+          点名了文件就打开读；其它标准记为 unverified，不假装通过。这是诚实的 v0.1，不是成熟验收。
+        </p>
+        <p>
+          结构冲突：external 步骤要求带 locator 的 <code>receipt</code>（<code>verification.ts:107-111</code>），黑盒 Adapter 的 <code>evidenceKinds</code> 只有 <code>artifact</code> 和 <code>observation</code>（<code>black-box-cli-worker.ts:104</code>）。
+          <code>external-operator</code> 角色因此会在验证关口结构性失败——除非走另一条能发 receipt 的 Adapter，而那条路不存在。Connector 只有只读 <code>FileConnector</code>。
+        </p>
+        <p><strong>接到哪里：</strong> 给「跑测试 / diff 审查」写成可执行 Verifier 插件；receipt 必须来自 Kernel 观察过的连接器，而不是 Worker 自报。在那之前，不要把 external 步骤标成可自动完成。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>6. 记忆与上下文</h3><span class="badge partial">partial</span></div>
+        <p>
+          治理记忆是 SQLite 索引 + Markdown 正文，召回是 CJK bigram / 拉丁词面匹配（<code>md-memory-store.ts:86-97</code>、<code>:224-264</code>）。
+          README 自己承认这不是向量检索。没有提升时去重、没有冲突合并、没有 PII 管道（只有 <code>public|private|secret</code> 标签）。
+        </p>
+        <p>
+          <code>LocalMemoryStore</code>（JSON）仍在仓库里，与治理库双轨。
+          Situation briefing 在 <code>createMainAgentSession</code> 时编译一次并缓存（<code>session.ts:57-63</code>）。companion 每次 query 重建会话所以还新鲜；长寿命 CLI resume 会读到过期情境。
+        </p>
+        <p>
+          压缩依赖 Pi SDK；本仓库用 <code>search_history</code> 把被摘要掉的对话捞回来。Harness 自己不算窗口、不编 prompt 版本。
+        </p>
+        <p><strong>接到哪里：</strong> 先删或封死 legacy store；召回加一层 embedding 作为 rerank，而不是换掉可测试的 bigram；briefing 改为每 turn 重编译或设 TTL。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>7. 模型层</h3><span class="badge partial">partial</span></div>
+        <p>
+          Planner 是可选的 OpenAI Responses API 裸 <code>fetch</code>（<code>llm-planner.ts:109-128</code>），强制 <code>create_work_plan</code> function call。
+          非法计划最多纠正一次（<code>:46-77</code>）。HTTP 429/5xx 没有退避：<code>createWorkPlan</code> 在 <code>plan()</code> 的 try 之外（<code>:63</code>），传输失败直接抛，不会进入纠正循环。
+        </p>
+        <p>
+          默认模型字符串是 <code>"gpt-5"</code>（<code>:153</code>）。Main Agent 的模型选在 Pi 的 <code>agentDir</code>，clone-ai 配置面管不到。
+          没有成本/延迟路由（<code>capability-dispatcher.ts</code> 注释里写了「未来再加入」）。没有 token / 美元账本。
+        </p>
+        <p><strong>接到哪里：</strong> 给 <code>OpenAIResponsesPlannerModel</code> 加状态码重试；把 Main Agent 模型写进 <code>config.json</code>；Journal 记 <code>usage</code> 事件，哪怕先从 Pi session metadata 抄过来。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>8. 可观测性</h3><span class="badge absent">absent</span></div>
+        <p>
+          生产日志是 <code>console.error</code>（队列恢复、Run 失败）。没有 Pino，没有 OpenTelemetry，没有 metrics，没有 <code>/health</code>。
+          唯一轨迹是 Journal。坏案例落到 <code>reporting/bad-cases.md</code>，注释写「Langfuse 以后再说」（<code>bad-case-log.ts:4-6</code>）。
+        </p>
+        <p>
+          GUI 设置里有「审计与轨迹」，数据来自 Journal 事件映射（<code>companion-server.ts:950</code>、<code>:1144</code>），不是分布式 trace。
+        </p>
+        <p><strong>接到哪里：</strong> 最小集是 JSON 日志 + <code>GET /api/health</code>（journal 可写、queue 未卡死、sidecar 存活）+ 每个 Run 的 duration/status 计数。OTel 可以等真的有第二个进程。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>9. 可靠性与运维</h3><span class="badge partial">partial</span></div>
+        <p>
+          队列、lease 续期、优雅 <code>close()</code> 停消费者，这些是真的。缺的是入口层限流：
+          <code>POST /api/main-agent/stream</code> 没有排队、没有单飞（<code>companion-server.ts:675-710</code>）。
+          workspace 有独占锁，但没有全局「最多 N 个 Worker」配置。
+        </p>
+        <p>
+          <code>desktop-sidecar.ts:21-22</code> 处理 SIGTERM/SIGINT；<code>companion:debug</code> 路径没有。
+          没有 log rotation（<code>.gitignore</code> 忽略 <code>*.log</code>，代码不切分）。
+        </p>
+        <p><strong>接到哪里：</strong> 把 sidecar 的 shutdown 提进 <code>startCompanionServer</code>；stream 入口加 in-flight=1 或明确拒绝并发。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>10. 安全</h3><span class="badge absent">loopback ≠ auth</span></div>
+        <p>
+          默认 <code>host = "127.0.0.1"</code>（<code>companion-server.ts:70</code>），请求体 32KB 上限（<code>:1273</code>）。
+          <code>handleRequest</code> 没有 token、没有 Origin/Host 校验、没有 CORS 白名单。
+          本机任意进程，或浏览器里一张恶意页面对 loopback 的 DNS rebinding，都可以调用
+          <code>POST /api/runs/:id/approve</code>、<code>POST /api/agents/:id/install</code>（npm global）、<code>PUT /api/settings/providers</code>。
+        </p>
+        <p>
+          Tauri <code>csp: null</code>（<code>apps/desktop/src-tauri/tauri.conf.json:22-24</code>）。
+          SMTP <code>reporting.json</code> 可存明文 <code>pass</code>；<code>tlsConnect({ rejectUnauthorized: false })</code>（<code>smtp-sender.ts:87</code>）。
+          没有 OS Keychain，没有加密 content store——这两项 README 写成了建议技术栈。
+        </p>
+        <p><strong>接到哪里：</strong> 启动时生成 loopback bearer，UI 与 CLI 自动带上；拒绝非 loopback Host；给安装与审批加第二因素（已有 quote-gate 只覆盖 Main Agent 工具路径，HTTP 按钮不经过它）。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>11. 评估与质量门禁</h3><span class="badge partial">partial</span></div>
+        <p>
+          离线测试面很宽，但没有 <code>.github/workflows</code>、没有 eslint/prettier/biome、没有 coverage 脚本（<code>.gitignore</code> 里有 <code>coverage/</code> 却从未产生）。
+          README 假设 CI 会跑 bench，仓库里没有 workflow。
+        </p>
+        <p>
+          <code>benchmark/run.ts</code> 五个任务（summarize / 两步链 / 三步管道 / code-tool / 预期失败）。
+          LongMemEval 离线召回：样本 <code>recallAny@1 ≈ 0.72</code>，<code>@10 ≈ 0.93</code>。没有 planner 质量回归、没有路由回归、没有 prompt 版本。
+        </p>
+        <p><strong>接到哪里：</strong> 一条 GitHub Action：<code>npm test</code> + <code>typecheck</code>。把 golden-path 固定为 harness 契约测试，比再写五个 bench 任务更值。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>12. 连接器与扩展</h3><span class="badge partial">partial</span></div>
+        <p>
+          Connector 接口是只读 <code>read() → Observation[]</code>（<code>connector.ts:50-56</code>）。实现只有本地文件。
+          日历 / 邮件在类型里出现，没有 adapter。观察写入 Journal 时只留标题和 locator，正文当数据不是指令——这个边界是对的，但主动生活信号还接不进来。
+        </p>
+        <p>
+          插件面：用户 <code>providers.json</code> + Pi <code>extensionFactories</code>。没有 Skill 市场、没有 MCP、没有第三方 Verifier。
+        </p>
+        <p><strong>接到哪里：</strong> 日历只读是 Phase 2 的最小证明；写入必须产出 Kernel 侧 receipt。不要先做宽邮件访问（README 自己把这列为暂缓）。</p>
+      </article>
+
+      <article class="dim">
+        <div class="dim-head"><h3>13. 产品与分发</h3><span class="badge absent">absent</span></div>
+        <p>
+          桌面是 Tauri 2 + 原生 HTML/JS。构建脚本是 Windows PowerShell；sidecar 用 <code>esbuild</code> + <code>@yao-pkg/pkg</code>，
+          但 <code>esbuild</code> 不在 <code>package.json</code> 依赖里（<code>scripts/build-sidecar.mjs</code>）。
+          无代码签名、无自动更新、无 CHANGELOG、无 Docker、无 <code>.env.example</code>。托盘 / 通知桌面 README 自己标成以后。
+        </p>
+        <p>UI 文案硬编码中文；<code>config.locale</code> 存在但界面不跟。无 e2e UI 测试。</p>
+        <p><strong>接到哪里：</strong> 先把 <code>esbuild</code> 写进 devDependencies，让 macOS 能 <code>tauri build</code>；签名和 updater 是发布问题，不是 Kernel 问题。</p>
+      </article>
+    </section>
+
+    <section id="roadmap">
+      <h2>优先级路线</h2>
+      <p>原则：先堵住「所有者以为系统在保护他、其实入口是开的」的洞；再让合同里的字段变成真的；最后才扩展生活领域。</p>
+
+      <h3><span class="badge p0">P0</span> 控制面漏洞 · 现有 seam 就能接</h3>
+      <table>
+        <thead><tr><th>事项</th><th>现有缝</th><th>完成标准</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Loopback bearer + Host/Origin 校验</td>
+            <td><code>handleRequest</code> 入口</td>
+            <td>无 token 的 approve / install 返回 401；非 loopback Host 拒绝</td>
+          </tr>
+          <tr>
+            <td>cancel / reject 端点与 CLI</td>
+            <td><code>CloneRuntime.cancel</code> · <code>failRun</code></td>
+            <td><code>POST /api/runs/:id/cancel|reject</code>；<code>clone-ai cancel|reject</code>；waiting_approval 可结束</td>
+          </tr>
+          <tr>
+            <td>Main Agent 单飞</td>
+            <td><code>runMainAgentQuery</code></td>
+            <td>同一 session 文件同时只有一个 <code>prompt</code>；第二请求 409 或排队</td>
+          </tr>
+          <tr>
+            <td>预算字段二选一</td>
+            <td><code>assertBudget</code> · 黑盒 Worker</td>
+            <td>要么计数 maxModelCalls/maxToolCalls，要么从合同删除，测试同步改</td>
+          </tr>
+          <tr>
+            <td>ToolAuthority 命运</td>
+            <td><code>tool-authority.ts</code></td>
+            <td>接入本地工具路径，或标成 unused 并从架构图拿掉，避免双叙事</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3><span class="badge p1">P1</span> 工程成熟度</h3>
+      <ul>
+        <li>JSON 结构化日志 + <code>GET /api/health</code> + 每 Run 的 duration/status。</li>
+        <li>Planner 对 429/5xx 退避；Main Agent 模型进入 <code>config.json</code>；Journal 记 usage。</li>
+        <li>危险步骤用 worktree；checkpoint 可还原，而不只是 hash 裁决。</li>
+        <li>Verifier 插件：跑测试、读 diff。在有可信 receipt 来源之前，external 步骤不得标 completed。</li>
+        <li>CI：<code>npm test</code> + <code>typecheck</code>。补上 <code>esbuild</code> 依赖。companion 全路径 SIGTERM。</li>
+      </ul>
+
+      <h3><span class="badge p2">P2</span> 能力扩展</h3>
+      <ul>
+        <li>记忆：embedding rerank、提升时去重、冲突暴露给所有者、PII 扫描。</li>
+        <li>只读日历连接器；写入动作走 Kernel receipt。</li>
+        <li>策略阶梯与常设授权（真正使用 <code>grantedBy: "standing_policy"</code>）。</li>
+        <li>跨平台打包、签名、更新；CSP；Keychain；SMTP 不再 <code>rejectUnauthorized: false</code>。</li>
+      </ul>
+    </section>
+
+    <section id="readme">
+      <h2>README / 文档 vs 代码</h2>
+      <p>愿景文档超前、执行文档滞后，两边都不该被当成现状。</p>
+      <table>
+        <thead><tr><th>文档说</th><th>代码是</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>建议栈：Zod、Drizzle、Pino、OpenTelemetry、Vitest、Keychain、加密 content store（<code>README.zh-CN.md</code> 实现架构）</td>
+            <td><code>package.json</code> 只有 <code>typebox</code> 与 <code>@earendil-works/pi-coding-agent</code>。持久化是手写 SQLite + JSON。</td>
+          </tr>
+          <tr>
+            <td>计划 CLI：<code>init</code> / <code>connect calendar</code> / <code>approve</code> / <code>trace</code> / <code>memory forget</code></td>
+            <td>实际 CLI：对话、status、workers、install、sessions、memory 搜索、cases、opportunities、bench、doctor。没有 approve/trace/forget。</td>
+          </tr>
+          <tr>
+            <td><code>docs/query-execution-flow.zh-CN.md:99</code>「Codex、Claude Code 真实 Adapter 尚未实现；当前是 Demo Adapter」</td>
+            <td><code>BlackBoxCliWorker</code> + <code>src/workers/providers.json</code> 已是真实 CLI 配方。文档过期。</td>
+          </tr>
+          <tr>
+            <td><code>docs/initial-runtime.zh-CN.md</code>：Journal 计划替换为 SQLite；有意暂未实现机会发现与个人世界模型</td>
+            <td>默认已是 SQLite；<code>OpportunityService</code> 与 <code>PersonalStateStore</code> 已落地。</td>
+          </tr>
+          <tr>
+            <td><code>docs/architecture/agent-runtime-convergence.zh-CN.md</code> P0 模块（intent-classifier、agent-router…）列为缺失</td>
+            <td>这些文件已在 <code>src/main-agent/</code>。P1 的 <code>task-runtime/</code> 目录仍不存在，职责散落在 <code>CloneRuntime</code> + <code>RunQueueConsumer</code>。</td>
+          </tr>
+          <tr>
+            <td>Python Worker、NDJSON 协议、独立 venv</td>
+            <td>零 Python 运行时代码。只有文档。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="bugs">
+      <h2>顺手发现的 bug</h2>
+      <p>不是架构缺口，是实现已经声明了却没做完。</p>
+      <table>
+        <thead><tr><th>问题</th><th>位置</th><th>现象</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>DailyReportSettings.hour</code> 从未读取</td>
+            <td><code>daily-report-runner.ts:25-26</code> 声明；<code>:53-60</code> 只看「本地日是否变化」</td>
+            <td>配置发送时刻无效；进程在新的一天第一次 tick 就发</td>
+          </tr>
+          <tr>
+            <td>SMTP MIME From/To 是占位符</td>
+            <td><code>smtp-sender.ts:76-77</code>：<code>clone-ai@local</code> / <code>recipient</code></td>
+            <td>信封 MAIL/RCPT 用 config，信头不是；部分服务商拒信或显示错误发件人</td>
+          </tr>
+          <tr>
+            <td>SMTP TLS 不校验证书</td>
+            <td><code>smtp-sender.ts:87</code> <code>rejectUnauthorized: false</code></td>
+            <td>日常报告邮件可被 MITM；密码在 <code>reporting.json</code> 明文</td>
+          </tr>
+          <tr>
+            <td>external 步骤 vs 黑盒 evidenceKinds</td>
+            <td><code>verification.ts:107-111</code> vs <code>black-box-cli-worker.ts:104</code></td>
+            <td><code>external-operator</code> 跑完也会因缺 receipt 验证失败</td>
+          </tr>
+          <tr>
+            <td><code>esbuild</code> 未声明依赖</td>
+            <td><code>scripts/build-sidecar.mjs</code> vs <code>package.json</code></td>
+            <td>干净安装后 desktop sidecar 构建直接炸</td>
+          </tr>
+          <tr>
+            <td><code>.idea/</code> 未忽略</td>
+            <td><code>.gitignore</code></td>
+            <td>JetBrains 元数据容易被误提交（当前工作区已有未跟踪 <code>.idea/</code>）</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="appendix">
+      <h2>方法与附录</h2>
+      <div class="cols">
+        <div>
+          <h3>审计读过什么</h3>
+          <ul>
+            <li>全部 <code>src/</code>（约 67 个 <code>.ts</code>）与 <code>package.json</code> / <code>tsconfig.json</code></li>
+            <li><code>src/companion-server.ts</code> 全部路由、<code>apps/desktop/ui</code>、<code>tauri.conf.json</code></li>
+            <li>中文 README 与 <code>docs/*.zh-CN.md</code> 路线图段落</li>
+            <li>测试目录清单与 live 门控；benchmark 结果样本</li>
+          </ul>
+        </div>
+        <div>
+          <h3>刻意没有做的</h3>
+          <ul>
+            <li>没有跑 live 模型（<code>CLONE_AI_MAIN_LIVE</code> / <code>CLONE_AI_PI_LIVE</code>）</li>
+            <li>没有把 clone-ai 与某一家商业 harness 做功能对照表营销</li>
+            <li>没有改源码；本文件是只读审计产物</li>
+          </ul>
+        </div>
+      </div>
+      <h3>Main Agent 的 8 个工具</h3>
+      <table>
+        <thead><tr><th>工具</th><th>权限</th></tr></thead>
+        <tbody>
+          <tr><td><code>propose_work_plan</code></td><td>提案；Kernel <code>attachPlan</code> 校验</td></tr>
+          <tr><td><code>request_approval</code></td><td>只读，永不批准</td></tr>
+          <tr><td><code>recall_memory</code></td><td>治理库只读召回</td></tr>
+          <tr><td><code>get_run_status</code></td><td>只读投影</td></tr>
+          <tr><td><code>get_situation</code></td><td>重编译情境简报</td></tr>
+          <tr><td><code>search_history</code></td><td>含已被 compaction 的对话</td></tr>
+          <tr><td><code>record_state</code></td><td>引文核验后写个人状态</td></tr>
+          <tr><td><code>install_agent</code></td><td>引文核验后 npm 安装 Worker</td></tr>
+        </tbody>
+      </table>
+      <h3>对照「成熟 harness」时用的定义</h3>
+      <p>
+        不是「更能聊天」，而是：有界循环、工具闸门、可取消、可审计、可隔离副作用、预算是真的、失败可诊断、入口不能被本机随便打穿。
+        clone-ai 在「有界」和「可审计」上已经站得很前；在「可取消 / 可隔离 / 入口锁死 / 预算为真」上还像骨架。
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    产物路径：<code>docs/harness-gap-analysis.html</code> · 离线可打开 · 支持 <code>prefers-color-scheme</code> 与打印。
+    行号相对于 clone-ai @ <code>f37cb05</code>（2026-08-25 合并点）及此后工作区未改动的源码。
+  </footer>
+</body>
+</html>

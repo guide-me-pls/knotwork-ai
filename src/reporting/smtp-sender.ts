@@ -61,7 +61,7 @@ export async function sendEmail(config: SmtpConfig, message: SmtpMessage): Promi
     await session.command(`MAIL FROM:<${config.from}>`, /^2\d\d/);
     await session.command(`RCPT TO:<${config.to}>`, /^2\d\d/);
     await session.command("DATA", /^3\d\d/);
-    await session.raw(`${toData(message.subject, message.text)}${CRLF}.`);
+    await session.raw(`${toData(config, message)}${CRLF}.`);
     await session.expect(/^2\d\d/);
     await session.command("QUIT", /^2\d\d/);
   } finally {
@@ -69,13 +69,13 @@ export async function sendEmail(config: SmtpConfig, message: SmtpMessage): Promi
   }
 }
 
-function toData(subject: string, text: string): string {
+function toData(config: SmtpConfig, message: SmtpMessage): string {
   // Dot-stuffing and CRLF normalization per RFC 5321. 按 RFC 5321 做点填充与 CRLF 归一化。
-  const body = `${text}\n`.replace(/\r?\n/g, CRLF);
+  const body = `${message.text}\n`.replace(/\r?\n/g, CRLF);
   return [
-    `From: clone-ai <${"clone-ai@local"}>`,
-    `To: <${"recipient"}>`,
-    `Subject: ${subject}`,
+    `From: ${config.from}`,
+    `To: ${config.to}`,
+    `Subject: ${message.subject}`,
     "Content-Type: text/plain; charset=utf-8",
     "",
     body,
@@ -84,7 +84,7 @@ function toData(subject: string, text: string): string {
 
 function connectTls(config: SmtpConfig): Promise<TLSSocket> {
   return new Promise((resolve, reject) => {
-    const socket = tlsConnect({ host: config.host, port: config.port, rejectUnauthorized: false }, () => resolve(socket));
+    const socket = tlsConnect({ host: config.host, port: config.port, rejectUnauthorized: true }, () => resolve(socket));
     socket.once("error", reject);
   });
 }
@@ -130,7 +130,7 @@ class SmtpSession {
     return new Promise((resolve, reject) => {
       const plain = this.#socket as Socket;
       plain.removeAllListeners("data");
-      const tls = tlsConnect({ socket: plain, rejectUnauthorized: false }, () => {
+      const tls = tlsConnect({ socket: plain, rejectUnauthorized: true }, () => {
         this.#attach(tls);
         resolve();
       });

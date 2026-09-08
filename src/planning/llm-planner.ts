@@ -81,6 +81,8 @@ interface OpenAIResponsesPlannerModelOptions {
   apiKey: string;
   model: string;
   fetcher?: typeof fetch;
+  /** Backoff between retryable HTTP failures, in milliseconds. 可重试 HTTP 失败之间的退避（毫秒）。 */
+  retryDelaysMs?: number[];
 }
 
 /**
@@ -95,6 +97,7 @@ export class OpenAIResponsesPlannerModel implements StructuredPlannerModel {
   readonly #apiKey: string;
   readonly #model: string;
   readonly #fetch: typeof fetch;
+  readonly #retryDelaysMs: number[];
 
   constructor(options: OpenAIResponsesPlannerModelOptions) {
     if (options.apiKey.trim().length === 0) {
@@ -103,39 +106,47 @@ export class OpenAIResponsesPlannerModel implements StructuredPlannerModel {
     this.#apiKey = options.apiKey;
     this.#model = options.model;
     this.#fetch = options.fetcher ?? fetch;
+    this.#retryDelaysMs = options.retryDelaysMs ?? [200, 800];
   }
 
   async createWorkPlan(input: { planning: PlanningInput; correction?: string }): Promise<unknown> {
-    const response = await this.#fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.#apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: this.#model,
-        instructions: plannerInstructions(),
-        input: [{
-          role: "user",
-          content: [{ type: "input_text", text: JSON.stringify(input) }],
-        }],
-        tools: [createWorkPlanTool],
-        // A planner without a structured proposal is not useful to the Runtime.
-        // 没有结构化提案的 Planner 对 Runtime 没有作用，因此强制这一次调用。
-        tool_choice: { type: "function", name: "create_work_plan" },
-        store: false,
-      }),
-    });
-    const body = await response.json() as OpenAIResponse | OpenAIErrorResponse;
-    if (!response.ok) {
-      throw new Error(`OpenAI Responses API error (${response.status}): ${readApiError(body)}`);
+    const attempts = this.#retryDelaysMs.length + 1;
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const response = await this.#fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.#apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.#model,
+          instructions: plannerInstructions(),
+          input: [{
+            role: "user",
+            content: [{ type: "input_text", text: JSON.stringify(input) }],
+          }],
+          tools: [createWorkPlanTool],
+          // A planner without a structured proposal is not useful to the Runtime.
+          // 没有结构化提案的 Planner 对 Runtime 没有作用，因此强制这一次调用。
+          tool_choice: { type: "function", name: "create_work_plan" },
+          store: false,
+        }),
+      });
+      const body = await response.json() as OpenAIResponse | OpenAIErrorResponse;
+      if (response.ok) {
+        const call = (body as OpenAIResponse).output.find(isFunctionCall);
+        if (call === undefined || call.name !== "create_work_plan") {
+          throw new Error("The planner response did not contain the required create_work_plan function call.");
+        }
+        return parseJsonObject(call.arguments, "planner function arguments");
+      }
+      lastError = new Error(`OpenAI Responses API error (${response.status}): ${readApiError(body)}`);
+      const retryable = response.status === 429 || (response.status >= 500 && response.status <= 599);
+      if (!retryable || attempt === attempts - 1) throw lastError;
+      await delay(this.#retryDelaysMs[attempt] ?? 0);
     }
-
-    const call = (body as OpenAIResponse).output.find(isFunctionCall);
-    if (call === undefined || call.name !== "create_work_plan") {
-      throw new Error("The planner response did not contain the required create_work_plan function call.");
-    }
-    return parseJsonObject(call.arguments, "planner function arguments");
+    throw lastError ?? new Error("The planner request failed.");
   }
 }
 
@@ -376,6 +387,11 @@ function budgetForRisk(risk: RiskClass): SubagentWorkOrder["budget"] {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface OpenAIResponse {

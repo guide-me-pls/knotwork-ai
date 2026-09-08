@@ -1459,14 +1459,21 @@ function assertBudget(order: SubagentWorkOrder): void {
   if (typeof order.budget !== "object" || order.budget === null) {
     throw new Error(`Subagent work order ${order.id} needs an execution budget.`);
   }
-  for (const name of ["maxDurationMs", "maxModelCalls", "maxToolCalls", "maxAttempts"] as const) {
+  // Duration and attempts are the limits the Kernel and black-box workers
+  // actually apply. Model/tool ceilings are optional declarations: a CLI
+  // subprocess cannot report those counts, so requiring them was a lie.
+  // 时长与尝试次数才是 Kernel 和黑盒 Worker 真正执行的上限。模型/工具次数是可选声明：
+  // CLI 子进程报不出这些计数，强制要求它们等于在合同里撒谎。
+  for (const name of ["maxDurationMs", "maxAttempts"] as const) {
     if (!Number.isInteger(order.budget[name]) || order.budget[name] < 1) {
       throw new Error(`Subagent work order ${order.id} has an invalid budget value for ${name}.`);
     }
   }
-  for (const [name, value] of Object.entries(order.budget)) {
+  for (const name of ["maxModelCalls", "maxToolCalls"] as const) {
+    const value = order.budget[name];
+    if (value === undefined) continue;
     if (!Number.isInteger(value) || value < 1) {
-      throw new Error(`Subagent work order ${order.id} has an invalid budget value for ${name}.`);
+      throw new Error(`Subagent work order ${order.id} has an invalid advisory budget value for ${name}.`);
     }
   }
 }

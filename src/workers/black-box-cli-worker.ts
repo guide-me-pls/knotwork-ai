@@ -1,3 +1,12 @@
+/**
+ * Black-box CLI workers. ToolAuthority is intentionally unused here: the Kernel
+ * cannot authorize, time out, or reconcile individual tools inside
+ * claude/codex/pi. Duration and attempt budgets on the WorkOrder are the
+ * contract that still applies.
+ *
+ * 黑盒 CLI Worker。这里故意不走 ToolAuthority：Kernel 无法对 claude/codex/pi 内部的
+ * 单个 Tool 做授权、超时或崩溃对账。仍然生效的合同是 WorkOrder 上的时长与尝试次数。
+ */
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";

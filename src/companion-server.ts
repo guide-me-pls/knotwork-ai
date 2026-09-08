@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { JournalEvent, MemoryCandidate, MemorySensitivity, MemoryType, Run, Task } from "./core/contracts.ts";
 import { createJournalStore } from "./core/sqlite-journal.ts";
 import { replay } from "./core/run-state.ts";
-import { approveQueryRun, runQuery } from "./application/run-query.ts";
+import { approveQueryRun, cancelQueryRun, rejectQueryRun, runQuery } from "./application/run-query.ts";
 import { LocalScheduler } from "./scheduling/local-scheduler.ts";
 import { describeSchedule, ScheduleStore, type LocalSchedule, type ScheduleKind } from "./scheduling/schedule-store.ts";
 import { SessionStore } from "./sessions/session-store.ts";
@@ -14,6 +14,13 @@ import { loadProviderRegistry } from "./workers/provider-catalog.ts";
 import { WorkerSettingsStore } from "./config/worker-settings.ts";
 import { WorkerRegistry } from "./workers/worker-registry.ts";
 import { runMainAgentQuery } from "./application/run-main-query.ts";
+import { MainAgentBusyError } from "./main-agent/prompt-lock.ts";
+import {
+  authorizeCompanionRequest,
+  injectCompanionToken,
+  issueCompanionToken,
+  persistCompanionToken,
+} from "./companion-auth.ts";
 import { MemoryGovernance } from "./memory/memory-governance.ts";
 import { OpportunityService } from "./opportunity/opportunity-service.ts";
 import { RunQueueConsumer } from "./application/run-queue.ts";
@@ -56,6 +63,7 @@ export interface CompanionServerOptions {
 
 export interface RunningCompanionServer {
   url: string;
+  token: string;
   close(): Promise<void>;
 }
 
@@ -99,6 +107,10 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
     readFile(join(clientDirectory, "style.css"), "utf8"),
     readFile(join(clientDirectory, "app.js"), "utf8"),
   ]);
+  const token = issueCompanionToken();
+  await persistCompanionToken(paths.dataDirectory, token);
+  const clientHtml = injectCompanionToken(client, token);
+  const startedAt = Date.now();
   const schedules = new ScheduleStore(paths.schedulesFile);
   const sessions = new SessionStore(paths.sessionsFile);
   const providers = await loadProviderRegistry(dataDirectory);
@@ -209,15 +221,19 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
   const maintenance = setInterval(() => void runMaintenance(), 5 * 60_000);
   maintenance.unref();
 
+  const bound = { port };
   const server = createServer(async (request, response) => {
     try {
       await handleRequest(request, response, {
         host,
+        listenPort: bound.port,
+        token,
+        startedAt,
         dataDirectory,
         workspacePath,
         paths,
         config,
-        client,
+        client: clientHtml,
         clientCss,
         clientJs,
         schedules,
@@ -229,6 +245,7 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
         badCaseLog,
         journal,
         runtime: queueRuntime,
+        runQueue,
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "The local runtime encountered an unexpected error.";
@@ -249,9 +266,11 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
     throw new Error("The local companion did not expose a TCP address.");
   }
   const url = `http://${host}:${address.port}`;
+  bound.port = address.port;
   scheduler.start();
   return {
     url,
+    token,
     // Shutdown waits for the queue: a consumer still writing into the data
     // directory after close() resolves is a corrupted journal.
     // 关闭要等待队列：close() 返回后仍在往数据目录写入的消费者，意味着损坏的 Journal。
@@ -276,9 +295,62 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  context: { host: string; dataDirectory: string; workspacePath: string; paths: ClonePaths; config: CloneConfigStore; client: string; clientCss: string; clientJs: string; schedules: ScheduleStore; sessions: SessionStore; agentSettings: WorkerSettingsStore; agentRegistry: WorkerRegistry; memoryGovernance: MemoryGovernance; opportunityService: OpportunityService; badCaseLog: BadCaseLog; journal: JournalStore; runtime: CloneRuntime },
+  context: {
+    host: string;
+    listenPort: number;
+    token: string;
+    startedAt: number;
+    dataDirectory: string;
+    workspacePath: string;
+    paths: ClonePaths;
+    config: CloneConfigStore;
+    client: string;
+    clientCss: string;
+    clientJs: string;
+    schedules: ScheduleStore;
+    sessions: SessionStore;
+    agentSettings: WorkerSettingsStore;
+    agentRegistry: WorkerRegistry;
+    memoryGovernance: MemoryGovernance;
+    opportunityService: OpportunityService;
+    badCaseLog: BadCaseLog;
+    journal: JournalStore;
+    runtime: CloneRuntime;
+    runQueue: RunQueueConsumer;
+  },
 ): Promise<void> {
   const url = new URL(request.url ?? "/", `http://${context.host}`);
+  const method = request.method ?? "GET";
+  const authorized = authorizeCompanionRequest({
+    method,
+    pathname: url.pathname,
+    hostHeader: headerValue(request.headers.host),
+    originHeader: headerValue(request.headers.origin),
+    authorization: headerValue(request.headers.authorization),
+    token: context.token,
+    listenPort: context.listenPort,
+  });
+  if (!authorized.ok) {
+    sendJson(response, authorized.status, { error: authorized.error });
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/api/health") {
+    let journal: "ok" | "error" = "ok";
+    try {
+      await context.journal.list();
+    } catch {
+      journal = "error";
+    }
+    sendJson(response, journal === "ok" ? 200 : 503, {
+      ok: journal === "ok",
+      pid: process.pid,
+      uptimeMs: Date.now() - context.startedAt,
+      journal,
+      queue: { inFlight: context.runQueue.inFlight().length },
+    });
+    return;
+  }
 
   if (request.method === "GET" && url.pathname === "/") {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
@@ -679,19 +751,22 @@ async function handleRequest(
       sendJson(response, 400, { error: "Please describe the request in at least three characters." });
       return;
     }
-    // Server-sent events, so the owner sees the reply forming instead of a
-    // frozen window for the length of a model call.
-    // 用 SSE 推送，让所有者看到回复正在生成，而不是在整个模型调用期间面对一个卡住的窗口。
-    response.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      // Chunks must reach the browser as they are written, not when a proxy
-      // decides the buffer is full.
-      // 分块必须在写出时就抵达浏览器，而不是等某个代理认为缓冲区满了才发。
-      "x-accel-buffering": "no",
-    });
+    // Delay the SSE headers until the Main Agent lock is held. A busy session
+    // must remain a readable 409, not an already-open stream.
+    // 等到拿到 Main Agent 锁再发 SSE 头。会话正忙时必须仍是可读的 409，而不是已经打开的流。
+    let streamOpen = false;
+    const ensureStream = (): void => {
+      if (streamOpen) return;
+      streamOpen = true;
+      response.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      });
+    };
     const send = (event: string, data: unknown): void => {
+      ensureStream();
       response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
     try {
@@ -700,12 +775,16 @@ async function handleRequest(
       });
       send("done", result);
     } catch (error: unknown) {
-      // The stream is already open, so a failure is delivered as an event
-      // rather than a status code the client can no longer read.
-      // 流已经打开，因此失败以事件形式送达，而不是客户端已无法读取的状态码。
+      if (!streamOpen) {
+        const busy = error instanceof MainAgentBusyError;
+        sendJson(response, busy ? 409 : 500, {
+          error: error instanceof Error ? error.message : "The Main Agent failed.",
+        });
+        return;
+      }
       send("failed", { error: error instanceof Error ? error.message : "The Main Agent failed." });
     } finally {
-      response.end();
+      if (streamOpen) response.end();
     }
     return;
   }
@@ -717,13 +796,16 @@ async function handleRequest(
       sendJson(response, 400, { error: "Please describe the request in at least three characters." });
       return;
     }
-    // The conversation-driven entry: the Main Agent proposes, the Kernel
-    // validates, and the response separates the agent's words from the runs
-    // the journal actually accepted.
-    // 对话驱动入口：Main Agent 提案、Kernel 校验；响应把 Agent 的话语与 Journal 真正
-    // 接受的 Run 分开返回。
-    const result = await runMainAgentQuery(context.dataDirectory, text);
-    sendJson(response, 200, result);
+    try {
+      const result = await runMainAgentQuery(context.dataDirectory, text);
+      sendJson(response, 200, result);
+    } catch (error: unknown) {
+      if (error instanceof MainAgentBusyError) {
+        sendJson(response, 409, { error: error.message });
+        return;
+      }
+      throw error;
+    }
     return;
   }
 
@@ -812,13 +894,47 @@ async function handleRequest(
 
   const approvalMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/approve$/);
   if (request.method === "POST" && approvalMatch?.[1] !== undefined) {
-    const result = await approveQueryRun(
-      context.dataDirectory,
-      decodeURIComponent(approvalMatch[1]),
-      await context.agentSettings.get(),
-      { workspacePath: context.workspacePath },
-    );
-    sendJson(response, 200, result);
+    try {
+      const result = await approveQueryRun(
+        context.dataDirectory,
+        decodeURIComponent(approvalMatch[1]),
+        await context.agentSettings.get(),
+        { workspacePath: context.workspacePath },
+      );
+      sendJson(response, 200, result);
+    } catch (error: unknown) {
+      sendJson(response, runActionStatus(error), { error: error instanceof Error ? error.message : "The run could not be approved." });
+    }
+    return;
+  }
+  const rejectMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/reject$/);
+  if (request.method === "POST" && rejectMatch?.[1] !== undefined) {
+    try {
+      const result = await rejectQueryRun(
+        context.dataDirectory,
+        decodeURIComponent(rejectMatch[1]),
+        await context.agentSettings.get(),
+        { workspacePath: context.workspacePath },
+      );
+      sendJson(response, 200, result);
+    } catch (error: unknown) {
+      sendJson(response, runActionStatus(error), { error: error instanceof Error ? error.message : "The run could not be rejected." });
+    }
+    return;
+  }
+  const cancelMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/cancel$/);
+  if (request.method === "POST" && cancelMatch?.[1] !== undefined) {
+    try {
+      const result = await cancelQueryRun(
+        context.dataDirectory,
+        decodeURIComponent(cancelMatch[1]),
+        await context.agentSettings.get(),
+        { workspacePath: context.workspacePath },
+      );
+      sendJson(response, 200, result);
+    } catch (error: unknown) {
+      sendJson(response, runActionStatus(error), { error: error instanceof Error ? error.message : "The run could not be cancelled." });
+    }
     return;
   }
   sendJson(response, 404, { error: "The local companion endpoint was not found." });
@@ -1277,6 +1393,18 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
   return body.length === 0 ? {} : asRecord(JSON.parse(body) as unknown);
 }
 
+function headerValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function runActionStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("Unknown run:")) return 404;
+  if (message.includes("is not waiting for an approval") || message.includes("cannot be cancelled")) return 409;
+  return 500;
+}
+
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   response.end(JSON.stringify(payload));
@@ -1358,7 +1486,14 @@ interface ScheduleView {
 
 if (process.argv[1]?.replaceAll("\\", "/").endsWith("/companion-server.ts") === true) {
   void startCompanionServer()
-    .then((companion) => console.log(`clone-ai desktop companion preview: ${companion.url}`))
+    .then((companion) => {
+      console.log(`clone-ai desktop companion preview: ${companion.url}`);
+      const shutdown = (): void => {
+        void companion.close().then(() => process.exit(0), () => process.exit(1));
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    })
     .catch((error: unknown) => {
       console.error(error);
       process.exitCode = 1;

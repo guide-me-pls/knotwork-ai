@@ -6,8 +6,9 @@ import test, { type TestContext } from "node:test";
 
 import { startCompanionServer, type RunningCompanionServer } from "../src/companion-server.ts";
 import { createJournalStore } from "../src/core/sqlite-journal.ts";
+import { companionFetch } from "./helpers/companion-api.ts";
 
-async function companion(t: TestContext): Promise<{ url: string; dataDirectory: string }> {
+async function companion(t: TestContext): Promise<{ url: string; token: string; dataDirectory: string }> {
   const dataDirectory = await mkdtemp(join(tmpdir(), "clone-api-home-"));
   const workspacePath = await mkdtemp(join(tmpdir(), "clone-api-ws-"));
   let server: RunningCompanionServer | undefined;
@@ -17,13 +18,13 @@ async function companion(t: TestContext): Promise<{ url: string; dataDirectory: 
     await rm(workspacePath, { recursive: true, force: true });
   });
   server = await startCompanionServer({ port: 0, dataDirectory, workspacePath });
-  return { url: server.url, dataDirectory };
+  return { url: server.url, token: server.token, dataDirectory };
 }
 
 test("the config endpoint reports where the owner's data lives", async (t) => {
-  const { url, dataDirectory } = await companion(t);
+  const { url, token, dataDirectory } = await companion(t);
 
-  const response = await fetch(`${url}/api/config`);
+  const response = await companionFetch(url, token, "/api/config");
   assert.equal(response.status, 200);
   const body = await response.json() as { config: { workspacePath: string; locale: string }; paths: Record<string, string> };
 
@@ -36,9 +37,9 @@ test("the config endpoint reports where the owner's data lives", async (t) => {
 });
 
 test("the owner can change the workspace and locale through the API", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const updated = await fetch(`${url}/api/config`, {
+  const updated = await companionFetch(url, token, "/api/config", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ workspacePath: "/tmp/another-project", locale: "en" }),
@@ -48,11 +49,11 @@ test("the owner can change the workspace and locale through the API", async (t) 
 
   // The change is durable, not just echoed back.
   // 变更是持久的，而不只是被回显。
-  const reread = await (await fetch(`${url}/api/config`)).json() as { config: { workspacePath: string; locale: string } };
+  const reread = await (await companionFetch(url, token, "/api/config")).json() as { config: { workspacePath: string; locale: string } };
   assert.equal(reread.config.workspacePath, "/tmp/another-project");
   assert.equal(reread.config.locale, "en");
 
-  const empty = await fetch(`${url}/api/config`, {
+  const empty = await companionFetch(url, token, "/api/config", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({}),
@@ -61,32 +62,32 @@ test("the owner can change the workspace and locale through the API", async (t) 
 });
 
 test("a third-party agent is added, listed, and removed without touching source", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const before = await (await fetch(`${url}/api/settings/providers`)).json() as { providers: Array<{ id: string }>; userDefined: unknown[] };
+  const before = await (await companionFetch(url, token, "/api/settings/providers")).json() as { providers: Array<{ id: string }>; userDefined: unknown[] };
   assert.equal(before.userDefined.length, 0);
   assert.ok(before.providers.some((provider) => provider.id === "claude-code"), "built-ins are listed");
 
-  const created = await fetch(`${url}/api/settings/providers`, {
+  const created = await companionFetch(url, token, "/api/settings/providers", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "opencode", command: "opencode", args: ["run", "{{prompt}}"], env: ["ANTHROPIC_API_KEY"] }),
   });
   assert.equal(created.status, 200);
 
-  const after = await (await fetch(`${url}/api/settings/providers`)).json() as { providers: Array<{ id: string }> };
+  const after = await (await companionFetch(url, token, "/api/settings/providers")).json() as { providers: Array<{ id: string }> };
   assert.ok(after.providers.some((provider) => provider.id === "opencode"));
 
-  const removed = await fetch(`${url}/api/settings/providers/opencode`, { method: "DELETE" });
+  const removed = await companionFetch(url, token, "/api/settings/providers/opencode", { method: "DELETE" });
   assert.equal(removed.status, 200);
-  const final = await (await fetch(`${url}/api/settings/providers`)).json() as { userDefined: unknown[] };
+  const final = await (await companionFetch(url, token, "/api/settings/providers")).json() as { userDefined: unknown[] };
   assert.equal(final.userDefined.length, 0);
 });
 
 test("the API refuses a provider declaration that carries a credential value", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const response = await fetch(`${url}/api/settings/providers`, {
+  const response = await companionFetch(url, token, "/api/settings/providers", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "leaky", command: "leaky", env: ["ANTHROPIC_API_KEY=sk-not-a-real-key"] }),
@@ -97,7 +98,7 @@ test("the API refuses a provider declaration that carries a credential value", a
   assert.equal(response.status, 400);
   assert.match((await response.json() as { error: string }).error, /variable names only/);
 
-  const stored = await (await fetch(`${url}/api/settings/providers`)).json() as { userDefined: unknown[] };
+  const stored = await (await companionFetch(url, token, "/api/settings/providers")).json() as { userDefined: unknown[] };
   assert.equal(stored.userDefined.length, 0);
 });
 
@@ -141,11 +142,12 @@ test("memory candidates can be listed and promoted through the API", async (t) =
   (journal as { close?: () => void }).close?.();
   server = await startCompanionServer({ port: 0, dataDirectory, workspacePath });
   const url = server.url;
+  const token = server.token;
 
-  const listed = await (await fetch(`${url}/api/memory/candidates`)).json() as { candidates: Array<{ id: string }> };
+  const listed = await (await companionFetch(url, token, "/api/memory/candidates")).json() as { candidates: Array<{ id: string }> };
   assert.deepEqual(listed.candidates.map((item) => item.id), ["c-1"]);
 
-  const promoted = await fetch(`${url}/api/memory/candidates/c-1/promote`, {
+  const promoted = await companionFetch(url, token, "/api/memory/candidates/c-1/promote", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
@@ -154,20 +156,20 @@ test("memory candidates can be listed and promoted through the API", async (t) =
   const body = await promoted.json() as { memory: { id: string; summary: string } };
   assert.match(body.memory.summary, /发布前必须完成风险评审/);
 
-  const after = await (await fetch(`${url}/api/memory/candidates`)).json() as { candidates: unknown[] };
+  const after = await (await companionFetch(url, token, "/api/memory/candidates")).json() as { candidates: unknown[] };
   assert.equal(after.candidates.length, 0);
 });
 
 test("installed agents are reported generically, including user-declared ones", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  await fetch(`${url}/api/settings/providers`, {
+  await companionFetch(url, token, "/api/settings/providers", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "opencode", command: "opencode-not-installed", args: ["run"] }),
   });
 
-  const agents = await (await fetch(`${url}/api/agents`)).json() as { providers: Array<{ id: string; installed: boolean }> };
+  const agents = await (await companionFetch(url, token, "/api/agents")).json() as { providers: Array<{ id: string; installed: boolean }> };
   const opencode = agents.providers.find((provider) => provider.id === "opencode");
   assert.ok(opencode, "a user-declared agent must appear in the agent list");
   // A missing command is reported, not thrown: the GUI stays usable.
@@ -176,23 +178,23 @@ test("installed agents are reported generically, including user-declared ones", 
 });
 
 test("connector declarations round-trip through the API and reject credential values", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const empty = await (await fetch(`${url}/api/connectors`)).json() as { connectors: unknown[] };
+  const empty = await (await companionFetch(url, token, "/api/connectors")).json() as { connectors: unknown[] };
   assert.deepEqual(empty.connectors, []);
 
-  const created = await fetch(`${url}/api/connectors`, {
+  const created = await companionFetch(url, token, "/api/connectors", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ connectors: [{ id: "local-files", enabled: true, target: "/notes" }] }),
   });
   assert.equal(created.status, 200);
-  const stored = await (await fetch(`${url}/api/connectors`)).json() as { connectors: Array<{ id: string }> };
+  const stored = await (await companionFetch(url, token, "/api/connectors")).json() as { connectors: Array<{ id: string }> };
   assert.deepEqual(stored.connectors.map((item) => item.id), ["local-files"]);
 
   // The same rule as providers: a config file must never hold a credential.
   // 与 Provider 同一条规则：配置文件绝不能存放凭据。
-  const leaky = await fetch(`${url}/api/connectors`, {
+  const leaky = await companionFetch(url, token, "/api/connectors", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ connectors: [{ id: "leaky", enabled: true, env: ["TOKEN=sk-not-real"] }] }),
@@ -202,9 +204,9 @@ test("connector declarations round-trip through the API and reject credential va
 });
 
 test("the situation endpoint reports what the twin knows, with no credential content", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const response = await fetch(`${url}/api/situation`);
+  const response = await companionFetch(url, token, "/api/situation");
   assert.equal(response.status, 200);
   const body = await response.json() as { text: string; overdue: unknown[]; activeGoals: unknown[] };
 
@@ -215,9 +217,9 @@ test("the situation endpoint reports what the twin knows, with no credential con
 });
 
 test("the streaming endpoint validates input before opening a stream", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const response = await fetch(`${url}/api/main-agent/stream`, {
+  const response = await companionFetch(url, token, "/api/main-agent/stream", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text: "  " }),

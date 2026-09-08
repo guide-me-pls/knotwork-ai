@@ -293,3 +293,29 @@ function workOrder(
     ...overrides,
   };
 }
+
+test("a work order may omit advisory model and tool call ceilings", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "clone-ai-budget-"));
+  t.after(async () => rm(directory, { recursive: true, force: true }));
+  const { runtime } = await createRuntime(directory);
+  const { run } = await runtime.acceptTrigger({ kind: "query", summary: "Research.", payload: {} });
+
+  await runtime.attachPlan(run.id, {
+    summary: "Research without pretending the Kernel counts model calls.",
+    steps: [{
+      id: "prepare",
+      title: "Research",
+      instructions: "Collect facts.",
+      risk: "read_only",
+      acceptanceCriteria: ["A note exists"],
+      subagents: [
+        workOrder({
+          id: "research",
+          budget: { maxDurationMs: 60_000, maxAttempts: 2 },
+        }),
+      ],
+    }],
+  });
+
+  assert.equal(runtime.getRun(run.id).status, "queued");
+});

@@ -53,6 +53,15 @@ export class DailyReportRunner {
   async maybeSend(): Promise<"sent" | "skipped" | "disabled"> {
     if (!this.#settings.enabled) return "disabled";
     const now = this.#now();
+    const hour = this.#settings.hour;
+    if (hour !== undefined) {
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+        throw new Error("Daily report hour must be an integer 0-23.");
+      }
+      // hour is local. Sending before it would ignore the owner's chosen time.
+      // hour 是本地时。在此之前发送等于忽略所有者选定的时刻。
+      if (now.getHours() < hour) return "skipped";
+    }
     const today = localDayKey(now);
     if (today === await this.#lastSentDay()) return "skipped";
     await this.#send(now);

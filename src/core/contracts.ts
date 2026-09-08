@@ -95,9 +95,16 @@ export interface ArtifactContract {
 
 export interface WorkOrderBudget {
   maxDurationMs: number;
-  maxModelCalls: number;
-  maxToolCalls: number;
   maxAttempts: number;
+  /**
+   * Advisory only. Black-box CLI workers do not expose model or tool counts,
+   * so the Kernel cannot enforce these ceilings. Duration and attempts are
+   * the budgets that actually stop work.
+   * 仅作声明。黑盒 CLI Worker 不暴露模型或工具调用次数，Kernel 无法执行这两个上限。
+   * 真正能停住工作的预算是时长与尝试次数。
+   */
+  maxModelCalls?: number;
+  maxToolCalls?: number;
 }
 
 /**

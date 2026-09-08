@@ -73,6 +73,8 @@ test("sendEmail completes the full SMTP conversation", async (t) => {
   const dataStart = transcript.indexOf("DATA");
   assert.ok(dataStart >= 0);
   const data = transcript.slice(dataStart + 1).join("\n");
+  assert.match(data, /From: clone-ai@local/);
+  assert.match(data, /To: owner@example.com/);
   assert.match(data, /Subject: 主题/);
   assert.match(data, /正文/);
 });
@@ -135,6 +137,28 @@ test("disabled reporting never sends and does not write a marker", async (t) => 
   assert.equal(await runner.maybeSend(), "disabled");
   const fs = await import("node:fs/promises");
   await assert.rejects(fs.readFile(join(directory, "reporting", "last-sent.json")));
+});
+
+test("DailyReportRunner waits until the configured local hour", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "clone-ai-report-hour-"));
+  t.after(async () => rm(directory, { recursive: true, force: true }));
+  const { port, transcript } = await fakeSmtp(t);
+  const journal = new JsonlJournalStore(join(directory, "journal.jsonl"));
+  let now = new Date(2026, 7, 19, 8, 0, 0);
+  const runner = new DailyReportRunner({
+    journal,
+    dataDirectory: directory,
+    settings: { enabled: true, hour: 9, smtp: smtpFor(port) },
+    opportunities: async () => [],
+    now: () => now,
+  });
+
+  assert.equal(await runner.maybeSend(), "skipped");
+  assert.equal(transcript.filter((line) => line.startsWith("MAIL FROM")).length, 0);
+
+  now = new Date(2026, 7, 19, 9, 0, 0);
+  assert.equal(await runner.maybeSend(), "sent");
+  assert.ok(transcript.some((line) => line.startsWith("MAIL FROM")));
 });
 
 test("localDayKey uses the local calendar day", () => {

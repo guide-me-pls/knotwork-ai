@@ -32,7 +32,7 @@ test("clone-ai --help lists the subcommands a new owner needs", async (t) => {
   const { code, stdout } = await runCli(t, ["--help"]);
 
   assert.equal(code, 0);
-  for (const command of ["gui", "status", "workers", "install", "memory", "cases", "opportunities", "doctor"]) {
+  for (const command of ["gui", "status", "workers", "install", "memory", "cases", "opportunities", "approve", "reject", "cancel", "doctor"]) {
     assert.match(stdout, new RegExp(`clone-ai ${command}`), `help must document ${command}`);
   }
 });

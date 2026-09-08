@@ -103,6 +103,53 @@ test("OpenAI Responses planner forces exactly one structured function call", asy
   assert.equal((proposal as { summary?: string }).summary, "Answer directly.");
 });
 
+test("OpenAI Responses planner retries 429 then succeeds", async () => {
+  let calls = 0;
+  const model = new OpenAIResponsesPlannerModel({
+    apiKey: "test-key",
+    model: "test-model",
+    retryDelaysMs: [0],
+    fetcher: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        output: [{ type: "function_call", name: "create_work_plan", arguments: JSON.stringify(directPlan()) }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    },
+  });
+
+  const proposal = await model.createWorkPlan({ planning: { query: "解释术语", recalledMemories: [], availableAgents: agents } });
+  assert.equal(calls, 2);
+  assert.equal((proposal as { summary?: string }).summary, "Answer directly.");
+});
+
+test("OpenAI Responses planner does not retry a 400", async () => {
+  let calls = 0;
+  const model = new OpenAIResponsesPlannerModel({
+    apiKey: "test-key",
+    model: "test-model",
+    retryDelaysMs: [0],
+    fetcher: async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ error: { message: "bad request" } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => model.createWorkPlan({ planning: { query: "解释术语", recalledMemories: [], availableAgents: agents } }),
+    /OpenAI Responses API error \(400\)/,
+  );
+  assert.equal(calls, 1);
+});
+
 test("workflow uses an injected LLM planner before it dispatches an executor", async () => {
   const directory = await mkdtemp(join(tmpdir(), "clone-ai-llm-planner-"));
   try {

@@ -22,7 +22,7 @@ import type { DispatchBlockedCode } from "../main-agent/dispatch-contracts.ts";
 
 export interface QueryRunResult {
   runId: string;
-  status: DispatchResult["status"] | "blocked";
+  status: DispatchResult["status"] | "blocked" | "cancelled";
   activeStepId?: string;
   subagentsCompleted: number;
   memoryCandidatesProposed: number;
@@ -291,6 +291,65 @@ export async function approveQueryRun(
   } finally {
     // Including the error path above: a rejected approval must not leave the
     // database open. 包括上面的错误路径：被拒绝的审批不能把数据库留在打开状态。
+    assembly.close();
+  }
+}
+
+export async function rejectQueryRun(
+  dataDirectory: string,
+  runId: string,
+  settings?: CloneSettings,
+  options: QueryWorkflowOptions = {},
+): Promise<QueryRunResult> {
+  void settings;
+  const assembly = await createRuntimeAssembly({
+    dataDirectory,
+    ...(options.workspacePath === undefined ? {} : { workspacePath: options.workspacePath }),
+  });
+  try {
+    const { runtime } = assembly;
+    const run = runtime.getRun(runId);
+    if (run.status !== "waiting_approval" || run.activeStepId === undefined) {
+      throw new Error(`Run ${runId} is not waiting for an approval.`);
+    }
+    // A rejected approval is a terminal owner decision, not a pause. failRun
+    // journals failed so waiting_approval cannot hang forever.
+    // 拒绝审批是所有者的终态决定，不是暂停。failRun 把 failed 记入 Journal，
+    // waiting_approval 不能永远挂着。
+    await runtime.failRun(run.id, "Rejected by the owner from the local companion.");
+    return toQueryResult(runtime, { run: runtime.getRun(run.id), status: "failed" }, 0);
+  } finally {
+    assembly.close();
+  }
+}
+
+export async function cancelQueryRun(
+  dataDirectory: string,
+  runId: string,
+  settings?: CloneSettings,
+  options: QueryWorkflowOptions = {},
+): Promise<QueryRunResult> {
+  const assembly = await createRuntimeAssembly({
+    dataDirectory,
+    ...(options.workspacePath === undefined ? {} : { workspacePath: options.workspacePath }),
+  });
+  try {
+    const { runtime, failureCatalog, paths } = assembly;
+    const workspacePath = paths.workspacePath;
+    const registry = options.agents ?? await createConfiguredAgentRegistry((settings?.agents ?? defaultWorkerProfiles()), {
+      dataDirectory,
+      workspacePath,
+      failureCatalog,
+    });
+    const cancelled = await runtime.cancel(runId, registry);
+    return {
+      runId: cancelled.id,
+      status: "cancelled",
+      activeStepId: cancelled.activeStepId,
+      subagentsCompleted: runtime.getSubagentsForRun(cancelled.id).filter((subagent) => subagent.status === "completed").length,
+      memoryCandidatesProposed: 0,
+    };
+  } finally {
     assembly.close();
   }
 }

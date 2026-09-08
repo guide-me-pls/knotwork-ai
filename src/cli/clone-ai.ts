@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { defaultLegacyDirectory, migrateLegacyCloneHome, prepareCloneHome, resolveClonePaths } from "../config/clone-home.ts";
 import { createMainAgentSession } from "../main-agent/session.ts";
 import { createKernelRuntime } from "../main-agent/tools/kernel-tools.ts";
+import { MainAgentBusyError, withMainAgentLock } from "../main-agent/prompt-lock.ts";
 import { BadCaseLog } from "../reporting/bad-case-log.ts";
 import { OpportunityService } from "../opportunity/opportunity-service.ts";
 import { createJournalStore } from "../core/sqlite-journal.ts";
@@ -41,6 +42,9 @@ Usage:
   clone-ai memory [query]        List or search reviewed memories
   clone-ai cases                 Print the local bad-case log
   clone-ai opportunities         List open opportunity cards
+  clone-ai approve <runId>       Approve a run waiting for confirmation
+  clone-ai reject <runId>        Reject a run waiting for confirmation
+  clone-ai cancel <runId>        Cancel a queued, running, or waiting run
   clone-ai bench [--provider p]  Run the reliability benchmark
   clone-ai doctor                Check the local setup
   clone-ai --help | --version
@@ -80,6 +84,9 @@ async function main(): Promise<number> {
     case "memory": return showMemory(paths.dataDirectory, argv.slice(1).join(" ").trim());
     case "cases": return showCases(paths.dataDirectory);
     case "opportunities": return showOpportunities(paths.dataDirectory);
+    case "approve": return decideRun(paths.dataDirectory, argv[1], "approve");
+    case "reject": return decideRun(paths.dataDirectory, argv[1], "reject");
+    case "cancel": return decideRun(paths.dataDirectory, argv[1], "cancel");
     case "bench": return runBench(argv.slice(1));
     case "doctor": return doctor(paths.dataDirectory);
     default: return converse(paths.dataDirectory, argv.join(" ").trim());
@@ -92,33 +99,43 @@ async function converse(dataDirectory: string, query: string, fresh = false): Pr
     console.error('Please describe what you want. Example: clone-ai "整理今天要推进的事情"');
     return 1;
   }
-  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
-  const { session } = await createMainAgentSession({
-    dataDirectory,
-    // A fresh conversation is explicit; the default continues the last one.
-    // 新会话是显式选择；默认续上一次对话。
-    ...(fresh ? { sessionManager: SessionManager.create(dataDirectory, join(dataDirectory, "pi-sessions", "main-agent")) } : {}),
-  });
-  if (fresh) {
-    const file = session.sessionManager.getSessionFile();
-    if (file !== undefined) {
-      const { writeCurrentSessionPointer } = await import("../main-agent/session.ts");
-      await writeCurrentSessionPointer(join(dataDirectory, "pi-sessions", "main-agent"), file);
-    }
-  }
-  session.subscribe((event) => {
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      process.stdout.write(event.assistantMessageEvent.delta);
-    }
-  });
   try {
-    await session.prompt(query);
-    process.stdout.write("\n");
-    await drainQueuedRuns(dataDirectory);
-    return 0;
-  } finally {
-    session.dispose();
+    await withMainAgentLock(dataDirectory, async () => {
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+      const { session } = await createMainAgentSession({
+        dataDirectory,
+        // A fresh conversation is explicit; the default continues the last one.
+        // 新会话是显式选择；默认续上一次对话。
+        ...(fresh ? { sessionManager: SessionManager.create(dataDirectory, join(dataDirectory, "pi-sessions", "main-agent")) } : {}),
+      });
+      if (fresh) {
+        const file = session.sessionManager.getSessionFile();
+        if (file !== undefined) {
+          const { writeCurrentSessionPointer } = await import("../main-agent/session.ts");
+          await writeCurrentSessionPointer(join(dataDirectory, "pi-sessions", "main-agent"), file);
+        }
+      }
+      session.subscribe((event) => {
+        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+          process.stdout.write(event.assistantMessageEvent.delta);
+        }
+      });
+      try {
+        await session.prompt(query);
+        process.stdout.write("\n");
+      } finally {
+        session.dispose();
+      }
+    });
+  } catch (error: unknown) {
+    if (error instanceof MainAgentBusyError) {
+      console.error(error.message);
+      return 1;
+    }
+    throw error;
   }
+  await drainQueuedRuns(dataDirectory);
+  return 0;
 }
 
 /**
@@ -348,6 +365,18 @@ async function showOpportunities(dataDirectory: string): Promise<number> {
   } finally {
     (journal as { close?: () => void }).close?.();
   }
+}
+
+async function decideRun(dataDirectory: string, runId: string | undefined, action: "approve" | "reject" | "cancel"): Promise<number> {
+  if (runId === undefined || runId.trim().length === 0) {
+    console.error(`Usage: clone-ai ${action} <runId>`);
+    return 1;
+  }
+  const { approveQueryRun, cancelQueryRun, rejectQueryRun } = await import("../application/run-query.ts");
+  const fn = action === "approve" ? approveQueryRun : action === "reject" ? rejectQueryRun : cancelQueryRun;
+  const result = await fn(dataDirectory, runId.trim());
+  console.log(`${action} ${result.runId.slice(0, 8)} → ${result.status}`);
+  return 0;
 }
 
 async function runBench(args: string[]): Promise<number> {

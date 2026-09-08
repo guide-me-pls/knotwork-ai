@@ -20,6 +20,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import { startCompanionServer, type RunningCompanionServer } from "../src/companion-server.ts";
+import { companionFetch } from "./helpers/companion-api.ts";
 
 interface LibraryMemory {
   id: string;
@@ -31,7 +32,7 @@ interface LibraryMemory {
   confidence: string;
 }
 
-async function companion(t: TestContext): Promise<{ url: string; dataDirectory: string }> {
+async function companion(t: TestContext): Promise<{ url: string; token: string; dataDirectory: string }> {
   const dataDirectory = await mkdtemp(join(tmpdir(), "clone-library-home-"));
   const workspacePath = await mkdtemp(join(tmpdir(), "clone-library-ws-"));
   let server: RunningCompanionServer | undefined;
@@ -41,19 +42,19 @@ async function companion(t: TestContext): Promise<{ url: string; dataDirectory: 
     await rm(workspacePath, { recursive: true, force: true });
   });
   server = await startCompanionServer({ port: 0, dataDirectory, workspacePath });
-  return { url: server.url, dataDirectory };
+  return { url: server.url, token: server.token, dataDirectory };
 }
 
-async function library(url: string): Promise<{ memories: LibraryMemory[]; stats: { active: number; archived: number; contentDirectory: string } }> {
-  const response = await fetch(`${url}/api/memory/governed`);
+async function library(url: string, token: string): Promise<{ memories: LibraryMemory[]; stats: { active: number; archived: number; contentDirectory: string } }> {
+  const response = await companionFetch(url, token, "/api/memory/governed");
   assert.equal(response.status, 200);
   return await response.json() as never;
 }
 
 test("a memory written in the GUI becomes a file the owner can open", async (t) => {
-  const { url } = await companion(t);
+  const { url, token } = await companion(t);
 
-  const created = await fetch(`${url}/api/memory/governed`, {
+  const created = await companionFetch(url, token, "/api/memory/governed", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -66,7 +67,7 @@ test("a memory written in the GUI becomes a file the owner can open", async (t) 
   assert.equal(created.status, 201);
   const { memory } = await created.json() as { memory: LibraryMemory };
 
-  const view = await library(url);
+  const view = await library(url, token);
   const stored = view.memories.find((item) => item.id === memory.id);
   assert.ok(stored !== undefined);
   assert.equal(stored.type, "preference");
@@ -81,20 +82,20 @@ test("a memory written in the GUI becomes a file the owner can open", async (t) 
 });
 
 test("an edit made in the GUI rewrites the file", async (t) => {
-  const { url } = await companion(t);
-  const created = await fetch(`${url}/api/memory/governed`, {
+  const { url, token } = await companion(t);
+  const created = await companionFetch(url, token, "/api/memory/governed", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ summary: "初始摘要内容", content: "初始正文" }),
   });
   const { memory } = await created.json() as { memory: LibraryMemory };
 
-  const patched = await fetch(`${url}/api/memory/governed/${memory.id}`, {
+  const patched = await companionFetch(url, token, `/api/memory/governed/${memory.id}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
     body: JSON.stringify({ summary: "修正后的摘要", content: "修正后的正文", type: "decision" }),
   });
   assert.equal(patched.status, 200);
 
-  const view = await library(url);
+  const view = await library(url, token);
   const file = await readFile(join(view.stats.contentDirectory, `${memory.id}.md`), "utf8");
   assert.match(file, /修正后的正文/);
   assert.doesNotMatch(file, /初始正文/);
@@ -102,13 +103,13 @@ test("an edit made in the GUI rewrites the file", async (t) => {
 });
 
 test("a memory hand-edited on disk reaches the index without a GUI action", async (t) => {
-  const { url } = await companion(t);
-  const created = await fetch(`${url}/api/memory/governed`, {
+  const { url, token } = await companion(t);
+  const created = await companionFetch(url, token, "/api/memory/governed", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ summary: "会被手动改掉的摘要", content: "旧正文" }),
   });
   const { memory } = await created.json() as { memory: LibraryMemory };
-  const { stats } = await library(url);
+  const { stats } = await library(url, token);
   const path = join(stats.contentDirectory, `${memory.id}.md`);
 
   // The owner opens the file in an editor, as they are invited to.
@@ -116,46 +117,46 @@ test("a memory hand-edited on disk reaches the index without a GUI action", asyn
   const source = await readFile(path, "utf8");
   await writeFile(path, source.replace("会被手动改掉的摘要", "在编辑器里改过的摘要").replace("旧正文", "新正文"), "utf8");
 
-  const reread = await library(url);
+  const reread = await library(url, token);
   const synced = reread.memories.find((item) => item.id === memory.id);
   assert.equal(synced?.summary, "在编辑器里改过的摘要");
   assert.equal(synced?.content, "新正文");
 });
 
 test("archiving moves the file out of the active folder and restoring brings it back", async (t) => {
-  const { url } = await companion(t);
-  const created = await fetch(`${url}/api/memory/governed`, {
+  const { url, token } = await companion(t);
+  const created = await companionFetch(url, token, "/api/memory/governed", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ summary: "不再适用的偏好设置" }),
   });
   const { memory } = await created.json() as { memory: LibraryMemory };
-  const { stats } = await library(url);
+  const { stats } = await library(url, token);
 
-  await fetch(`${url}/api/memory/governed/${memory.id}`, {
+  await companionFetch(url, token, `/api/memory/governed/${memory.id}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
     body: JSON.stringify({ status: "archived" }),
   });
   assert.deepEqual(await readdir(stats.contentDirectory).then((names) => names.filter((name) => name.endsWith(".md"))), []);
   assert.ok((await readdir(join(stats.contentDirectory, "archived"))).includes(`${memory.id}.md`));
-  assert.equal((await library(url)).stats.archived, 1);
+  assert.equal((await library(url, token)).stats.archived, 1);
 
-  await fetch(`${url}/api/memory/governed/${memory.id}`, {
+  await companionFetch(url, token, `/api/memory/governed/${memory.id}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
     body: JSON.stringify({ status: "active" }),
   });
-  const restored = await library(url);
+  const restored = await library(url, token);
   assert.equal(restored.stats.active, 1);
   assert.equal(restored.memories.find((item) => item.id === memory.id)?.status, "active");
 });
 
 test("every governance decision is journaled, including the owner's own writing", async (t) => {
-  const { url, dataDirectory } = await companion(t);
-  const created = await fetch(`${url}/api/memory/governed`, {
+  const { url, token, dataDirectory } = await companion(t);
+  const created = await companionFetch(url, token, "/api/memory/governed", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ summary: "需要被审计到的记忆" }),
   });
   const { memory } = await created.json() as { memory: LibraryMemory };
-  await fetch(`${url}/api/memory/governed/${memory.id}`, {
+  await companionFetch(url, token, `/api/memory/governed/${memory.id}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
     body: JSON.stringify({ content: "改过一次", status: "archived" }),
   });
@@ -173,11 +174,11 @@ test("every governance decision is journaled, including the owner's own writing"
 });
 
 test("a memory rejected for being too short never reaches the folder", async (t) => {
-  const { url } = await companion(t);
-  const response = await fetch(`${url}/api/memory/governed`, {
+  const { url, token } = await companion(t);
+  const response = await companionFetch(url, token, "/api/memory/governed", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ summary: "短" }),
   });
   assert.equal(response.status, 400);
-  assert.equal((await library(url)).memories.length, 0);
+  assert.equal((await library(url, token)).memories.length, 0);
 });
