@@ -22,6 +22,7 @@ import {
   persistCompanionToken,
 } from "./companion-auth.ts";
 import { MemoryGovernance } from "./memory/memory-governance.ts";
+import { scanMemoryPii } from "./memory/memory-hygiene.ts";
 import { OpportunityService } from "./opportunity/opportunity-service.ts";
 import { RunQueueConsumer } from "./application/run-queue.ts";
 import { createRuntimeAssembly } from "./core/runtime-factory.ts";
@@ -611,7 +612,12 @@ async function handleRequest(
   }
   if (request.method === "GET" && url.pathname === "/api/memory/candidates") {
     const candidates = await context.memoryGovernance.pendingCandidates();
-    sendJson(response, 200, { candidates });
+    sendJson(response, 200, {
+      candidates: candidates.map((candidate) => ({
+        ...candidate,
+        piiFindings: scanMemoryPii(candidate.summary),
+      })),
+    });
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/memory/governed") {
@@ -1315,6 +1321,7 @@ function toTimelineItem(event: JournalEvent): { label: string; detail: string; o
     "agent.tool_started": "Agent started a tool",
     "agent.tool_completed": "Agent finished a tool",
     "evidence.recorded": "Recorded evidence",
+    "workspace.isolation.applied": "Returned isolated files",
     "verification.completed": "Verified the result",
     "memory.candidate.requested": "Queued memory review",
     "memory.candidate.proposed": "Proposed memory candidate",
@@ -1352,6 +1359,11 @@ function detailFor(type: JournalEvent["type"], payload: Record<string, unknown>)
   }
   if (type === "verification.completed") {
     return typeof payload.summary === "string" ? payload.summary : "Recorded the verification result.";
+  }
+  if (type === "workspace.isolation.applied") {
+    return typeof payload.summary === "string"
+      ? payload.summary
+      : `Isolated work settled at ${String(payload.isolatedPath ?? "the sandbox")}.`;
   }
   if (type === "memory.recalled") {
     const memories = Array.isArray(payload.memories) ? payload.memories : [];

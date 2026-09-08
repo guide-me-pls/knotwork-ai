@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -19,20 +19,22 @@ test("a second Main Agent prompt is refused while the first still holds the lock
     await held;
     return "first";
   });
+  first.catch(() => undefined);
 
+  const lockPath = mainAgentLockPath(dataDirectory);
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      await withMainAgentLock(dataDirectory, async () => "second");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    } catch (error: unknown) {
-      assert.ok(error instanceof MainAgentBusyError);
-      release();
-      assert.equal(await first, "first");
-      assert.equal(await withMainAgentLock(dataDirectory, async () => "after"), "after");
-      return;
+      await access(lockPath);
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
   }
-  throw new Error("the second prompt was never refused");
+
+  await assert.rejects(withMainAgentLock(dataDirectory, async () => "second"), MainAgentBusyError);
+  release();
+  assert.equal(await first, "first");
+  assert.equal(await withMainAgentLock(dataDirectory, async () => "after"), "after");
 });
 
 test("a lock file whose owner is gone is stolen rather than wedging the session", async (t) => {

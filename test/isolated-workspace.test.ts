@@ -7,6 +7,8 @@ import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
 
 import {
+  applyIsolatedArtifacts,
+  matchesNamedFile,
   prepareIsolatedWorkspace,
   requiresIsolatedWorkspace,
   type GitRunner,
@@ -111,6 +113,51 @@ test("a failing worktree falls back to a directory copy", async (t) => {
   t.after(() => isolated.dispose());
   assert.equal(isolated.kind, "directory_copy");
   assert.equal(await readFile(join(isolated.path, "note.md"), "utf8"), "hello\n");
+});
+
+test("named isolated files copy into the owner tree; unnamed writes stay behind", async (t) => {
+  const owner = await tempDir(t, "clone-iso-apply-owner-");
+  const isolated = await tempDir(t, "clone-iso-apply-box-");
+  await writeFile(join(owner, "keep.md"), "owner\n", "utf8");
+  await writeFile(join(isolated, "keep.md"), "owner\n", "utf8");
+  await writeFile(join(isolated, "receipt.md"), "delivered\n", "utf8");
+  await writeFile(join(isolated, "poison.md"), "do not merge\n", "utf8");
+
+  const result = await applyIsolatedArtifacts({
+    isolatedPath: isolated,
+    ownerPath: owner,
+    namedFiles: ["receipt.md"],
+  });
+
+  assert.deepEqual(result.copied, ["receipt.md"]);
+  assert.equal(result.leftover.includes("poison.md"), true);
+  assert.equal(result.sandboxRetained, true);
+  assert.equal(await readFile(join(owner, "receipt.md"), "utf8"), "delivered\n");
+  await assert.rejects(access(join(owner, "poison.md")), /ENOENT/);
+  assert.equal(await readFile(join(owner, "keep.md"), "utf8"), "owner\n");
+});
+
+test("an existing owner file is not overwritten by isolated apply", async (t) => {
+  const owner = await tempDir(t, "clone-iso-conflict-owner-");
+  const isolated = await tempDir(t, "clone-iso-conflict-box-");
+  await writeFile(join(owner, "receipt.md"), "live\n", "utf8");
+  await writeFile(join(isolated, "receipt.md"), "isolated\n", "utf8");
+
+  const result = await applyIsolatedArtifacts({
+    isolatedPath: isolated,
+    ownerPath: owner,
+    namedFiles: ["receipt.md"],
+  });
+
+  assert.equal(result.copied.length, 0);
+  assert.equal(result.skipped[0]?.reason, "owner already has a different file at this path");
+  assert.equal(result.sandboxRetained, true);
+  assert.equal(await readFile(join(owner, "receipt.md"), "utf8"), "live\n");
+});
+
+test("matchesNamedFile accepts a nested path ending at the named file", () => {
+  assert.equal(matchesNamedFile("out/receipt.md", "receipt.md"), true);
+  assert.equal(matchesNamedFile("poison.md", "receipt.md"), false);
 });
 
 async function initGitRepo(directory: string): Promise<boolean> {

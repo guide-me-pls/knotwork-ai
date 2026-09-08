@@ -17,6 +17,7 @@ import type { Evidence, MemoryCandidate } from "../core/contracts.ts";
 import type { JournalStore } from "../core/journal.ts";
 import { MdMemoryStore, type MemoryEntry } from "./md-memory-store.ts";
 import type { MemoryType } from "../core/contracts.ts";
+import { memoryFingerprint, redactMemoryPii } from "./memory-hygiene.ts";
 
 export interface MemoryGovernanceOptions {
   journal: JournalStore;
@@ -59,12 +60,27 @@ export class MemoryGovernance {
    */
   async promote(candidate: MemoryCandidate, overrides: { type?: MemoryType; sensitivity?: MemoryCandidate["sensitivity"] } = {}): Promise<MemoryEntry> {
     await this.assertEvidenceExists(candidate.sourceEvidenceIds);
+    const fingerprint = memoryFingerprint(candidate.summary);
+    const duplicate = (await this.#store.list({ status: "active" }))
+      .find((entry) => memoryFingerprint(entry.summary) === fingerprint);
+    if (duplicate !== undefined) {
+      throw new Error(`This candidate matches an existing memory (${duplicate.id}).`);
+    }
+    const redactedSummary = redactMemoryPii(candidate.summary);
+    const sourceLine = `Source: ${candidate.sourceEvidenceIds.map((id) => `evidence:${id}`).join(", ")}`;
+    const redactedContent = redactMemoryPii(`${candidate.summary}\n\n${sourceLine}`);
+    let sensitivity = overrides.sensitivity ?? candidate.sensitivity ?? "private";
+    // Public recall would serve the raw candidate to workers; PII stays secret.
+    // 公开召回会把原始候选交给 Worker；含 PII 的记忆保持 secret。
+    if (redactedSummary.kinds.length > 0 && sensitivity !== "secret") {
+      sensitivity = "secret";
+    }
     const entry = await this.#store.commit({
-      summary: candidate.summary,
-      content: `${candidate.summary}\n\nSource: ${candidate.sourceEvidenceIds.map((id) => `evidence:${id}`).join(", ")}`,
+      summary: redactedSummary.text,
+      content: redactedContent.text,
       type: overrides.type ?? candidate.type ?? "fact",
       confidence: candidate.confidence,
-      sensitivity: overrides.sensitivity ?? candidate.sensitivity ?? "private",
+      sensitivity,
       sourceRunId: candidate.runId,
       sourceEvidenceIds: candidate.sourceEvidenceIds,
       ...(candidate.expiresAt === undefined ? {} : { expiresAt: candidate.expiresAt }),
@@ -77,6 +93,9 @@ export class MemoryGovernance {
         memoryId: entry.id,
         summary: entry.summary,
         type: entry.type,
+        sensitivity: entry.sensitivity,
+        fingerprint,
+        ...(redactedSummary.kinds.length === 0 ? {} : { piiRedacted: redactedSummary.kinds }),
         decidedAt: new Date().toISOString(),
       },
     });

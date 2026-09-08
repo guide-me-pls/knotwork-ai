@@ -87,6 +87,43 @@ test("promote writes the markdown file, the sqlite row, and the journal event", 
   assert.match(file, /发布前必须完成风险评审/);
 });
 
+test("promote refuses a candidate that matches an active memory", async (t) => {
+  const { governance, journal } = await setup(t);
+  await journalEvidence(journal, ["ev-1", "ev-2"]);
+  await journal.append({ type: "memory.candidate.proposed", runId: "run-1", payload: candidate("c-1") });
+  await governance.promote((await governance.pendingCandidates())[0]!);
+  await journal.append({
+    type: "memory.candidate.proposed",
+    runId: "run-1",
+    payload: candidate("c-dup", { sourceEvidenceIds: ["ev-2"], summary: "用户偏好：发布前必须完成风险评审" }),
+  });
+
+  await assert.rejects(
+    governance.promote((await governance.pendingCandidates())[0]!),
+    /matches an existing memory/,
+  );
+});
+
+test("promote redacts PII and stores the memory as secret", async (t) => {
+  const { governance, journal } = await setup(t);
+  await journalEvidence(journal, ["ev-1"]);
+  await journal.append({
+    type: "memory.candidate.proposed",
+    runId: "run-1",
+    payload: candidate("c-pii", {
+      summary: "联系人是 owner@example.com，发布前必须完成风险评审",
+      sensitivity: "public",
+    }),
+  });
+
+  const entry = await governance.promote((await governance.pendingCandidates())[0]!);
+  assert.equal(entry.sensitivity, "secret");
+  assert.match(entry.summary, /\[redacted email\]/);
+  assert.doesNotMatch(entry.summary, /owner@example.com/);
+  const promoted = (await journal.list()).find((event) => event.type === "memory.candidate.promoted");
+  assert.deepEqual((promoted?.payload as { piiRedacted?: string[] }).piiRedacted, ["email"]);
+});
+
 test("promote refuses a candidate citing evidence that does not exist", async (t) => {
   const { governance, journal } = await setup(t);
   await journal.append({ type: "memory.candidate.proposed", runId: "run-1", payload: candidate("c-1", { sourceEvidenceIds: ["ghost"] }) });

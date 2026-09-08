@@ -285,6 +285,10 @@ export type JournalEventType =
   | "agent.tool_started"
   | "agent.tool_completed"
   | "evidence.recorded"
+  // Isolated work finished: which named files landed in the live tree, which
+  // stayed in the sandbox, and whether that sandbox was kept for inspection.
+  // 隔离工作结束：哪些点名文件落到了活树、哪些留在沙箱、沙箱是否保留供查看。
+  | "workspace.isolation.applied"
   | "verification.completed"
   | "memory.candidate.requested"
   | "memory.candidate.proposed"

@@ -40,10 +40,13 @@ import {
 } from "./workspace-evidence.ts";
 import { workspaceExecutionLock } from "./workspace-lock.ts";
 import {
+  applyIsolatedArtifacts,
+  looksLikeRelativeFile,
   prepareIsolatedWorkspace,
   requiresIsolatedWorkspace,
   type IsolatedWorkspace,
 } from "./isolated-workspace.ts";
+import { extractFileExpectations } from "./verification.ts";
 import { CLONE_DIRECTORY_NAME } from "../config/clone-home.ts";
 
 export interface CloneRuntimeOptions {
@@ -548,6 +551,12 @@ export class CloneRuntime {
       if (!this.stepHasCompletedEvidence(input.run.id, input.step)) {
         throw new Error(`Agent ${agentId} completed step ${input.step.id} without evidence.`);
       }
+      await this.settleIsolatedWorkspace({
+        workspace,
+        run: input.run,
+        task: input.task,
+        step: input.step,
+      });
     });
   }
 
@@ -716,6 +725,13 @@ export class CloneRuntime {
         if (!(await this.ensureWorkOrderVerified(input, adapter.id))) {
           throw new Error(`Subagent ${input.workOrder.id} did not satisfy its artifact contract.`);
         }
+        await this.settleIsolatedWorkspace({
+          workspace,
+          run: input.run,
+          task: input.task,
+          step: input.step,
+          workOrder: input.workOrder,
+        });
         return;
       } catch (error: unknown) {
         lastError = error;
@@ -728,6 +744,13 @@ export class CloneRuntime {
           await this.recordRecoveryDecision(input, recovery);
           if (recovery.decision === "reconciled") {
             await this.reconcileWorkspaceRecovery(input, adapter, recovery);
+            await this.settleIsolatedWorkspace({
+              workspace,
+              run: input.run,
+              task: input.task,
+              step: input.step,
+              workOrder: input.workOrder,
+            });
             return;
           }
           if (recovery.decision === "blocked") {
@@ -790,7 +813,7 @@ export class CloneRuntime {
   private async withExecutionWorkspace<T>(
     risk: RiskClass,
     key: string,
-    run: (workspace: { path?: string; isolation?: IsolatedWorkspace }) => Promise<T>,
+    run: (workspace: ExecutionWorkspace) => Promise<T>,
   ): Promise<T> {
     if (this.#workspacePath === undefined || !requiresIsolatedWorkspace(risk)) {
       return run({ path: this.#workspacePath });
@@ -800,11 +823,69 @@ export class CloneRuntime {
       sandboxRoot: this.#isolatedWorkspaceRoot,
       key,
     });
+    const workspace: ExecutionWorkspace = { path: isolation.path, isolation, retainSandbox: false };
     try {
-      return await run({ path: isolation.path, isolation });
+      return await run(workspace);
     } finally {
-      await isolation.dispose();
+      // Leftover or conflicting writes stay on disk so the owner can inspect them.
+      // 未拷回或冲突的写入留在磁盘上，所有者才能查看。
+      if (workspace.retainSandbox !== true) await isolation.dispose();
     }
+  }
+
+  /**
+   * Offers named artifacts back to the live tree, then journals where to look.
+   * Unnamed writes are never merged: isolation would otherwise be theater.
+   * 把点名产物交回活树，并记入 Journal 供查看。未点名的写入绝不合并：否则隔离只是演戏。
+   */
+  private async settleIsolatedWorkspace(input: {
+    workspace: ExecutionWorkspace;
+    run: Run;
+    task: Task;
+    step: PlanStep;
+    workOrder?: SubagentWorkOrder;
+  }): Promise<void> {
+    const isolation = input.workspace.isolation;
+    if (isolation === undefined || this.#workspacePath === undefined) return;
+
+    const namedFiles = namedFilesForIsolation(input.step, input.workOrder);
+    let result;
+    try {
+      result = await applyIsolatedArtifacts({
+        isolatedPath: isolation.path,
+        ownerPath: this.#workspacePath,
+        namedFiles,
+      });
+    } catch (error: unknown) {
+      const reason = error instanceof Error ? error.message : "isolated apply failed";
+      result = {
+        copied: [],
+        skipped: [{ path: ".", reason }],
+        leftover: [],
+        sandboxRetained: true,
+        isolatedPath: isolation.path,
+        ownerPath: this.#workspacePath,
+      };
+    }
+
+    input.workspace.retainSandbox = result.sandboxRetained;
+    await this.record({
+      type: "workspace.isolation.applied",
+      taskId: input.task.id,
+      runId: input.run.id,
+      payload: {
+        stepId: input.step.id,
+        ...(input.workOrder === undefined ? {} : { workOrderId: input.workOrder.id }),
+        kind: isolation.kind,
+        isolatedPath: result.isolatedPath,
+        ownerPath: result.ownerPath,
+        copied: result.copied,
+        skipped: result.skipped,
+        leftover: result.leftover,
+        sandboxRetained: result.sandboxRetained,
+        summary: summarizeIsolatedApply(result),
+      },
+    });
   }
 
   private assignmentWorkspaceFields(workspace: { path?: string; isolation?: IsolatedWorkspace }): Pick<ExecutionAssignment, "workspacePath" | "workspaceIsolation"> {
@@ -1548,6 +1629,40 @@ function isolationAudit(workspace: { isolation?: IsolatedWorkspace }): Record<st
       ownerPath: workspace.isolation.ownerPath,
     },
   };
+}
+
+interface ExecutionWorkspace {
+  path?: string;
+  isolation?: IsolatedWorkspace;
+  retainSandbox?: boolean;
+}
+
+function namedFilesForIsolation(step: PlanStep, workOrder?: SubagentWorkOrder): string[] {
+  const names = extractFileExpectations(step).map((item) => item.path);
+  for (const artifact of workOrder?.expectedArtifacts ?? []) {
+    if (looksLikeRelativeFile(artifact.description)) names.push(artifact.description.trim());
+  }
+  return [...new Set(names)];
+}
+
+function summarizeIsolatedApply(result: {
+  copied: string[];
+  skipped: Array<{ path: string; reason: string }>;
+  leftover: string[];
+  sandboxRetained: boolean;
+  isolatedPath: string;
+}): string {
+  const copied = result.copied.length === 0
+    ? "No named files were copied into the live project."
+    : `Copied into the live project: ${result.copied.join(", ")}.`;
+  if (!result.sandboxRetained) return `${copied} Isolated sandbox removed.`;
+  const leftover = result.leftover.length === 0
+    ? "No extra isolated writes."
+    : `Leftover isolated writes: ${result.leftover.join(", ")}.`;
+  const skipped = result.skipped.length === 0
+    ? ""
+    : ` Not copied: ${result.skipped.map((item) => `${item.path} (${item.reason})`).join("; ")}.`;
+  return `${copied} ${leftover}${skipped} Inspect ${result.isolatedPath}.`;
 }
 
 function assertBudget(order: SubagentWorkOrder): void {

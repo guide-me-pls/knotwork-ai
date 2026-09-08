@@ -249,6 +249,64 @@ test("an external step runs in an isolated workspace and cannot rewrite the owne
   assert.ok(isolation);
   assert.equal(isolation.ownerPath, workspace);
   assert.notEqual(isolation.path, workspace);
+  const applied = (await journal.list()).find((event) => event.type === "workspace.isolation.applied");
+  const applyPayload = applied?.payload as { leftover?: string[]; sandboxRetained?: boolean; isolatedPath?: string };
+  assert.equal(applyPayload.sandboxRetained, true);
+  assert.equal(applyPayload.leftover?.includes("poison.md"), true);
+  assert.equal(await readFile(join(applyPayload.isolatedPath ?? "", "poison.md"), "utf8"), "mutated\n");
+});
+
+test("named files from an isolated step land in the owner's tree", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "clone-ai-runtime-apply-"));
+  const workspace = await mkdtemp(join(tmpdir(), "clone-ai-runtime-apply-ws-"));
+  const sandboxRoot = await mkdtemp(join(tmpdir(), "clone-ai-runtime-apply-box-"));
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+    await rm(sandboxRoot, { recursive: true, force: true });
+  });
+  await writeFile(join(workspace, "owner.md"), "live\n", "utf8");
+
+  const journal = new JsonlJournalStore(join(directory, "journal.jsonl"));
+  const memory = new MemoryPipeline(journal);
+  const runtime = new CloneRuntime({
+    journal,
+    policy: new DefaultPolicyEngine(),
+    verifier: new EvidenceVerifier({ workspacePath: workspace }),
+    memory,
+    workspacePath: workspace,
+    isolatedWorkspaceRoot: sandboxRoot,
+  });
+  const writer = new IsolatedReceiptAdapter();
+  const { run } = await runtime.acceptTrigger({
+    kind: "query",
+    summary: "Send the approved update.",
+    payload: {},
+  });
+  await runtime.attachPlan(run.id, {
+    summary: "Send after approval.",
+    steps: [{
+      id: "send",
+      agentId: "external-operator",
+      requiredCapabilities: ["external_action"],
+      title: "Send update",
+      instructions: "Send the already-approved update and write `receipt.md`.",
+      risk: "external_side_effect",
+      acceptanceCriteria: ["`receipt.md` contains 'delivered'"],
+    }],
+  });
+  await runtime.grantApproval(run.id, "send");
+  const result = await runtime.execute(run.id, new StaticAgentRegistry([writer]));
+
+  assert.equal(result.status, "completed");
+  assert.equal(await readFile(join(workspace, "receipt.md"), "utf8"), "delivered\n");
+  await assert.rejects(access(join(workspace, "extra.md")), /ENOENT/);
+  const applied = (await journal.list()).find((event) => event.type === "workspace.isolation.applied");
+  const applyPayload = applied?.payload as { copied?: string[]; leftover?: string[]; sandboxRetained?: boolean; isolatedPath?: string };
+  assert.deepEqual(applyPayload.copied, ["receipt.md"]);
+  assert.equal(applyPayload.leftover?.includes("extra.md"), true);
+  assert.equal(applyPayload.sandboxRetained, true);
+  assert.equal(await readFile(join(applyPayload.isolatedPath ?? "", "extra.md"), "utf8"), "not named\n");
 });
 
 class WorkspacePoisonAdapter implements RuntimeAdapter {
@@ -275,6 +333,37 @@ class WorkspacePoisonAdapter implements RuntimeAdapter {
     yield {
       type: "evidence",
       evidence: { kind: "receipt", summary: "Delivery recorded by the isolated worker.", locator: "demo://send" },
+    };
+    yield { type: "completed", summary: "Sent." };
+  }
+}
+
+class IsolatedReceiptAdapter implements RuntimeAdapter {
+  readonly id = "external-operator";
+  readonly providerId = "demo";
+
+  async capabilities(): Promise<RuntimeCapabilities> {
+    return {
+      resume: false,
+      cancellation: false,
+      approvalCallback: false,
+      parallelAssignments: true,
+      work: ["external_action"],
+      evidenceKinds: ["artifact", "receipt", "observation"],
+    };
+  }
+
+  async *execute(input: ExecutionAssignment): AsyncIterable<ExecutionEvent> {
+    const root = input.workspacePath ?? process.cwd();
+    await writeFile(join(root, "receipt.md"), "delivered\n", "utf8");
+    await writeFile(join(root, "extra.md"), "not named\n", "utf8");
+    yield {
+      type: "evidence",
+      evidence: { kind: "receipt", summary: "Delivery recorded by the isolated worker.", locator: "demo://send" },
+    };
+    yield {
+      type: "evidence",
+      evidence: { kind: "artifact", summary: "Local receipt file.", locator: "receipt.md" },
     };
     yield { type: "completed", summary: "Sent." };
   }
