@@ -322,6 +322,9 @@ export function buildWorkerPrompt(input: ExecutionAssignment): string {
     `Work order: ${order?.title ?? input.step.title}`,
     `Objective: ${objective}`,
     `Risk boundary: ${order?.risk ?? input.step.risk}`,
+    ...(input.workspaceIsolation === undefined ? [] : [
+      `Isolated working directory: ${input.workspaceIsolation.kind}. File writes here do not change the owner's live project at ${input.workspaceIsolation.ownerPath}. Do not leave this directory.`,
+    ]),
     "",
     "Inputs:",
     inputs,

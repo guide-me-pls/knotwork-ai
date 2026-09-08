@@ -109,7 +109,7 @@ test("preparing the home creates the runtime directories only", async (t) => {
 
   await prepareCloneHome(paths);
 
-  for (const directory of [paths.dataDirectory, paths.outcomesDirectory, paths.checkpointsDirectory, paths.workspaceRuntimeDirectory]) {
+  for (const directory of [paths.dataDirectory, paths.outcomesDirectory, paths.checkpointsDirectory, paths.workspaceRuntimeDirectory, paths.isolatedWorkspacesDirectory]) {
     assert.equal((await stat(directory)).isDirectory(), true, `${directory} should exist`);
   }
   // JSON files stay absent until a feature writes one.

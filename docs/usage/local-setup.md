@@ -96,6 +96,8 @@ workers. Clone AI needs a headless CLI it can run with a prompt and a workspace.
 | Bad cases | `<clone home>/reporting/bad-cases.md` |
 | Provider overrides | `<clone home>/providers.json` |
 | Failure taxonomy | `<clone home>/outcomes/failures.json` |
+| Isolated workspaces | `<clone home>/isolated-workspaces/` |
+| Env template | `.env.example` in the repo (names only, never secret values) |
 
 ## 6. Platform notes
 

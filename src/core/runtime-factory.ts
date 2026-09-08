@@ -84,6 +84,7 @@ export async function createRuntimeAssembly(options: ClonePathOptions = {}): Pro
     workspacePath: paths.workspacePath,
     workspaceCheckpointStore: new JsonWorkspaceCheckpointStore(paths.checkpointsDirectory),
     workspaceCheckpointDirectory: join(paths.dataDirectory, "checkpoints"),
+    isolatedWorkspaceRoot: paths.isolatedWorkspacesDirectory,
     knownAgentIds: () => knownAgents,
   });
   await runtime.hydrate();

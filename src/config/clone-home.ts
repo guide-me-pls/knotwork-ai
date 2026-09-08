@@ -24,6 +24,12 @@ export interface ClonePaths {
   sessionsDirectory: string;
   workspaceRuntimeDirectory: string;
   workspaceLockFile: string;
+  /**
+   * Sandboxes for external/irreversible steps. Lives in clone home, not the
+   * owner's project, so a worker cannot walk `..` into live files.
+   * 外部/不可逆步骤的沙箱。放在 clone home 而不是所有者项目里，Worker 就不能靠 `..` 走进活文件。
+   */
+  isolatedWorkspacesDirectory: string;
 }
 
 export interface ClonePathOptions {
@@ -69,6 +75,7 @@ export function resolveClonePaths(options: ClonePathOptions = {}): ClonePaths {
     sessionsDirectory: join(dataDirectory, "sessions"),
     workspaceRuntimeDirectory,
     workspaceLockFile: join(workspaceRuntimeDirectory, "workspace-execution.lock"),
+    isolatedWorkspacesDirectory: join(dataDirectory, "isolated-workspaces"),
   };
 }
 
@@ -83,6 +90,7 @@ export async function prepareCloneHome(paths: ClonePaths): Promise<void> {
     mkdir(paths.checkpointsDirectory, { recursive: true }),
     mkdir(paths.sessionsDirectory, { recursive: true }),
     mkdir(paths.workspaceRuntimeDirectory, { recursive: true }),
+    mkdir(paths.isolatedWorkspacesDirectory, { recursive: true }),
   ]);
 }
 

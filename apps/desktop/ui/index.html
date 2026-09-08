@@ -9,36 +9,36 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="会话列表">
+      <aside class="sidebar" aria-label="会话列表" data-i18n="sessions-nav" data-i18n-attr="aria-label">
         <div class="brand-row">
           <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16.6 6.8a7.1 7.1 0 1 0 0 10.4"/><path d="m13.5 8.5 3.5 3.5-3.5 3.5"/></svg></div>
           <div class="brand">clone<span>-ai</span></div><span class="local-dot" title="本地运行中"></span>
         </div>
-        <button class="new-session" id="new-session" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建任务</button>
-        <button class="schedule-button" id="schedule-open" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg><span>定时任务</span><b id="schedule-count">0</b></button>
-        <div class="session-label">你的会话</div>
+        <button class="new-session" id="new-session" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg><span data-i18n="new-session">新建任务</span></button>
+        <button class="schedule-button" id="schedule-open" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg><span data-i18n="schedules">定时任务</span><b id="schedule-count">0</b></button>
+        <div class="session-label" data-i18n="your-sessions">你的会话</div>
         <div class="session-list" id="session-list" aria-live="polite"></div>
-        <button class="sidebar-footer" id="settings-open" type="button" aria-label="打开设置"><div class="avatar">你</div><div class="owner"><b>本地所有者</b><span>数据仅保留在此设备</span></div></button>
+        <button class="sidebar-footer" id="settings-open" type="button" aria-label="打开设置" data-i18n="open-settings" data-i18n-attr="aria-label"><div class="avatar" data-i18n="you">你</div><div class="owner"><b data-i18n="local-owner">本地所有者</b><span data-i18n="data-stays">数据仅保留在此设备</span></div></button>
       </aside>
 
-      <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整会话栏宽度" aria-valuemin="220" aria-valuemax="520" aria-valuenow="278" tabindex="0"></div>
+      <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整会话栏宽度" aria-valuemin="220" aria-valuemax="520" aria-valuenow="278" tabindex="0" data-i18n="resize-sidebar" data-i18n-attr="aria-label"></div>
       <main class="workspace">
         <header class="topbar">
-          <button class="menu-button" id="menu-open" type="button" aria-label="打开会话列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+          <button class="menu-button" id="menu-open" type="button" aria-label="打开会话列表" data-i18n="open-sessions" data-i18n-attr="aria-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
           <div class="topbar-title"><h1 id="session-title">新的对话</h1><p id="session-subtitle">从一个清晰的意图开始</p></div>
-          <div class="top-actions"><span class="status-pill" id="session-status">准备就绪</span><span class="private-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>仅本地</span></div>
+          <div class="top-actions"><span class="status-pill" id="session-status">准备就绪</span><span class="private-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span data-i18n="local-only">仅本地</span></span></div>
         </header>
 
-        <div class="opportunity-strip" id="opportunity-strip" hidden aria-label="分身发现的机会"></div>
+        <div class="opportunity-strip" id="opportunity-strip" hidden aria-label="分身发现的机会" data-i18n="opportunities" data-i18n-attr="aria-label"></div>
         <section class="conversation" id="conversation" aria-live="polite"><div class="conversation-inner" id="conversation-inner"></div></section>
-        <button class="scroll-bottom" id="scroll-bottom" type="button">回到底部</button>
+        <button class="scroll-bottom" id="scroll-bottom" type="button" data-i18n="scroll-bottom">回到底部</button>
 
         <div class="composer-wrap">
           <form class="composer" id="request-form">
-            <textarea id="query" rows="1" autocomplete="off" placeholder="告诉 clone-ai 你想推进什么…" aria-label="输入你的任务"></textarea>
-            <button class="send" id="submit" type="submit" aria-label="发送"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 14-7-5 14-2.7-5.3L5 12Z"/><path d="m11.3 13.7 3-3"/></svg></button>
+            <textarea id="query" rows="1" autocomplete="off" placeholder="告诉 clone-ai 你想推进什么…" aria-label="输入你的任务" data-i18n="query-placeholder" data-i18n-attr="placeholder"></textarea>
+            <button class="send" id="submit" type="submit" aria-label="发送" data-i18n="send" data-i18n-attr="aria-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 14-7-5 14-2.7-5.3L5 12Z"/><path d="m11.3 13.7 3-3"/></svg></button>
           </form>
-          <div class="composer-hint">Enter 发送 · Shift + Enter 换行 · 会在外部动作前向你确认</div>
+          <div class="composer-hint" data-i18n="composer-hint">Enter 发送 · Shift + Enter 换行 · 会在外部动作前向你确认</div>
         </div>
       </main>
     </div>
@@ -46,92 +46,94 @@
     <div class="notice" id="notice" role="status"></div>
     <div class="confirm-modal" id="confirm-modal" aria-hidden="true">
       <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-heading">
-        <h2 id="confirm-heading">确认操作</h2>
+        <h2 id="confirm-heading" data-i18n="confirm-heading">确认操作</h2>
         <p id="confirm-message"></p>
-        <div class="confirm-actions"><button class="secondary" id="confirm-cancel" type="button">取消</button><button class="approve" id="confirm-ok" type="button">确认</button></div>
+        <div class="confirm-actions"><button class="secondary" id="confirm-cancel" type="button" data-i18n="cancel">取消</button><button class="approve" id="confirm-ok" type="button" data-i18n="confirm">确认</button></div>
       </section>
     </div>
-    <div class="startup-screen" id="startup-screen" aria-live="polite"><div class="startup-card"><div class="startup-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16.6 6.8a7.1 7.1 0 1 0 0 10.4"/><path d="m13.5 8.5 3.5 3.5-3.5 3.5"/></svg></div><b>正在启动 clone-ai</b><span>连接本地运行时，数据不会离开此设备</span></div></div>
+    <div class="startup-screen" id="startup-screen" aria-live="polite"><div class="startup-card"><div class="startup-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16.6 6.8a7.1 7.1 0 1 0 0 10.4"/><path d="m13.5 8.5 3.5 3.5-3.5 3.5"/></svg></div><b data-i18n="startup-title">正在启动 clone-ai</b><span data-i18n="startup-body">连接本地运行时，数据不会离开此设备</span></div></div>
     <div class="schedule-modal" id="schedule-modal" aria-hidden="true">
       <section class="schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="schedule-heading">
-        <header class="schedule-dialog-header"><div><h2 id="schedule-heading">定时任务</h2><p>到点后触发本地工作；外部动作仍会单独等你确认。</p></div><button class="schedule-close" id="schedule-close" type="button" aria-label="关闭">×</button></header>
-        <form class="schedule-form" id="schedule-form"><input id="schedule-query" required minlength="3" placeholder="例如：整理今天需要推进的事情" aria-label="定时任务内容"/><select id="schedule-kind" aria-label="重复规则"><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option><option value="yearly">每年</option><option value="interval">按间隔</option></select><input id="schedule-time" type="time" required value="09:00" aria-label="执行时间"/><button class="schedule-create" id="schedule-create" type="submit">添加</button><div class="schedule-options" id="schedule-options"></div></form>
+        <header class="schedule-dialog-header"><div><h2 id="schedule-heading" data-i18n="schedules-heading">定时任务</h2><p data-i18n="schedules-lead">到点后触发本地工作；外部动作仍会单独等你确认。</p></div><button class="schedule-close" id="schedule-close" type="button" aria-label="关闭" data-i18n="close" data-i18n-attr="aria-label">×</button></header>
+        <form class="schedule-form" id="schedule-form"><input id="schedule-query" required minlength="3" placeholder="例如：整理今天需要推进的事情" aria-label="定时任务内容" data-i18n="schedule-placeholder" data-i18n-attr="placeholder"/><select id="schedule-kind" aria-label="重复规则" data-i18n="repeat-rule" data-i18n-attr="aria-label"><option value="daily" data-i18n="daily">每天</option><option value="weekly" data-i18n="weekly">每周</option><option value="monthly" data-i18n="monthly">每月</option><option value="yearly" data-i18n="yearly">每年</option><option value="interval" data-i18n="interval">按间隔</option></select><input id="schedule-time" type="time" required value="09:00" aria-label="执行时间" data-i18n="run-time" data-i18n-attr="aria-label"/><button class="schedule-create" id="schedule-create" type="submit" data-i18n="add">添加</button><div class="schedule-options" id="schedule-options"></div></form>
         <div class="schedule-list" id="schedule-list"></div>
       </section>
     </div>
     <div class="settings-modal" id="settings-modal" aria-hidden="true">
       <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-heading">
-        <header class="settings-dialog-header"><div><h2 id="settings-heading">设置</h2><p>管理本地分身的工作方式与可用角色。</p></div><button class="schedule-close" id="settings-close" type="button" aria-label="关闭">×</button></header>
+        <header class="settings-dialog-header"><div><h2 id="settings-heading" data-i18n="settings-heading">设置</h2><p data-i18n="settings-lead">管理本地分身的工作方式与可用角色。</p></div><button class="schedule-close" id="settings-close" type="button" aria-label="关闭" data-i18n="close" data-i18n-attr="aria-label">×</button></header>
         <div class="settings-shell">
-          <nav class="settings-nav" aria-label="设置导航">
-            <button type="button" data-settings-section="audit" aria-current="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h11"/><path d="m17 17 2 2 3-4"/></svg>审计与轨迹</button>
-            <button type="button" data-settings-section="agents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4.5"/></svg>Agent</button>
-            <button type="button" data-settings-section="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3h8a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Z"/><path d="M8 9h8M8 13h5"/></svg>记忆与数据</button>
-            <button type="button" data-settings-section="context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/><path d="M8 10h8M8 14h4"/></svg>上下文</button>
-            <button type="button" data-settings-section="safety"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 20 6v5c0 5-3.4 8.8-8 10-4.6-1.2-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg>权限与安全</button>
-            <button type="button" data-settings-section="situation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>情境与配置</button>
+          <nav class="settings-nav" aria-label="设置导航" data-i18n="settings-nav" data-i18n-attr="aria-label">
+            <button type="button" data-settings-section="audit" aria-current="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h11"/><path d="m17 17 2 2 3-4"/></svg><span data-i18n="nav-audit">审计与轨迹</span></button>
+            <button type="button" data-settings-section="agents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4.5"/></svg><span data-i18n="nav-agents">Agent</span></button>
+            <button type="button" data-settings-section="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3h8a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Z"/><path d="M8 9h8M8 13h5"/></svg><span data-i18n="nav-memory">记忆与数据</span></button>
+            <button type="button" data-settings-section="context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/><path d="M8 10h8M8 14h4"/></svg><span data-i18n="nav-context">上下文</span></button>
+            <button type="button" data-settings-section="safety"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 20 6v5c0 5-3.4 8.8-8 10-4.6-1.2-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg><span data-i18n="nav-safety">权限与安全</span></button>
+            <button type="button" data-settings-section="situation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i18n="nav-situation">情境与配置</span></button>
           </nav>
           <div class="settings-content">
             <section class="settings-panel" data-settings-panel="audit">
-              <h3>审计与执行轨迹</h3><p>每条会话都有可追溯的触发、计划、权限、Agent、证据和验证事件。选择一条会话可回到对话中查看完整记录。</p>
+              <h3 data-i18n="audit-title">审计与执行轨迹</h3><p data-i18n="audit-lead">每条会话都有可追溯的触发、计划、权限、Agent、证据和验证事件。选择一条会话可回到对话中查看完整记录。</p>
               <div class="audit-session-list" id="audit-session-list"></div>
             </section>
             <section class="settings-panel" data-settings-panel="agents" hidden>
-              <h3>Agent Registry</h3><p>clone-ai 负责计划、权限、交接和验证；下面的 CLI 是可以被角色绑定和调用的本地执行 Provider。</p>
-              <div class="agent-section-label">本机 Provider <button class="provider-install" id="install-missing-providers" type="button">自动安装缺失项</button></div>
+              <h3 data-i18n="agents-title">Agent Registry</h3><p data-i18n="agents-lead">clone-ai 负责计划、权限、交接和验证；下面的 CLI 是可以被角色绑定和调用的本地执行 Provider。</p>
+              <div class="agent-section-label"><span data-i18n="local-providers">本机 Provider</span> <button class="provider-install" id="install-missing-providers" type="button">自动安装缺失项</button></div>
               <div class="provider-registry" id="provider-registry"></div>
-              <div class="agent-section-label">工作角色与绑定</div>
+              <div class="agent-section-label" data-i18n="roles-bindings">工作角色与绑定</div>
               <div class="agent-settings-list" id="agent-settings-list"></div>
-              <p class="agent-runtime-note">Agent 以黑盒方式接入：Clone AI 只提供 Prompt 与工作目录，凭退出状态和工作区里真正发生的变化来判断结果，不解析任何 Provider 的内部协议。接入新 Agent 只需增加配置。</p>
+              <p class="agent-runtime-note" data-i18n="agents-note">Agent 以黑盒方式接入：Clone AI 只提供 Prompt 与工作目录，凭退出状态和工作区里真正发生的变化来判断结果，不解析任何 Provider 的内部协议。接入新 Agent 只需增加配置。</p>
             </section>
             <section class="settings-panel" data-settings-panel="memory" hidden>
-              <h3>记忆库</h3><p>每条记忆都是一个 <code>.md</code> 文件，正文归你所有。你可以在这里改，也可以直接用编辑器改文件——打开这个面板时会自动把磁盘上的改动同步回来。分身与子 Agent 都从这一个库召回。</p>
+              <h3 data-i18n="memory-title">记忆库</h3><p data-i18n="memory-lead">每条记忆都是一个 <code>.md</code> 文件，正文归你所有。你可以在这里改，也可以直接用编辑器改文件——打开这个面板时会自动把磁盘上的改动同步回来。分身与子 Agent 都从这一个库召回。</p>
               <div class="memory-overview" id="library-overview"></div>
               <div class="memory-tools">
                 <div class="memory-tool-row">
-                  <input id="library-new-summary" type="text" placeholder="一句话摘要，例如：我不接受未经确认就发出的邮件" aria-label="新记忆摘要"/>
-                  <select id="library-new-type" aria-label="记忆类型">
-                    <option value="preference">偏好</option><option value="fact">事实</option><option value="decision">决定</option><option value="procedure">流程</option><option value="commitment">承诺</option>
+                  <input id="library-new-summary" type="text" placeholder="一句话摘要，例如：我不接受未经确认就发出的邮件" aria-label="新记忆摘要" data-i18n="memory-summary-placeholder" data-i18n-attr="placeholder"/>
+                  <select id="library-new-type" aria-label="记忆类型" data-i18n="memory-type" data-i18n-attr="aria-label">
+                    <option value="preference" data-i18n="preference">偏好</option><option value="fact" data-i18n="fact">事实</option><option value="decision" data-i18n="decision">决定</option><option value="procedure" data-i18n="procedure">流程</option><option value="commitment" data-i18n="commitment">承诺</option>
                   </select>
-                  <select id="library-new-sensitivity" aria-label="敏感度">
-                    <option value="private">私有</option><option value="public">公开</option><option value="secret">机密</option>
+                  <select id="library-new-sensitivity" aria-label="敏感度" data-i18n="sensitivity" data-i18n-attr="aria-label">
+                    <option value="private" data-i18n="private">私有</option><option value="public" data-i18n="public">公开</option><option value="secret" data-i18n="secret">机密</option>
                   </select>
-                  <button class="primary" id="library-create" type="button">写入记忆库</button>
+                  <button class="primary" id="library-create" type="button" data-i18n="write-memory">写入记忆库</button>
                 </div>
-                <textarea id="library-new-content" placeholder="正文（可选）：展开说明背景、边界或例外。留空则与摘要相同。" aria-label="新记忆正文"></textarea>
-                <form class="memory-tool-row" id="memory-search-form"><input id="memory-search-query" type="text" placeholder="测试当前任务会召回哪些记忆" aria-label="测试 Memory 检索"/><button type="submit">测试检索</button></form>
+                <textarea id="library-new-content" placeholder="正文（可选）：展开说明背景、边界或例外。留空则与摘要相同。" aria-label="新记忆正文" data-i18n="memory-body-placeholder" data-i18n-attr="placeholder"></textarea>
+                <form class="memory-tool-row" id="memory-search-form"><input id="memory-search-query" type="text" placeholder="测试当前任务会召回哪些记忆" aria-label="测试 Memory 检索" data-i18n="memory-search-placeholder" data-i18n-attr="placeholder"/><button type="submit" data-i18n="test-recall">测试检索</button></form>
                 <div class="memory-search-results" id="memory-search-results"></div>
               </div>
               <div class="memory-candidates" id="memory-candidates"></div>
               <div class="memory-list" id="library-list"></div>
             </section>
             <section class="settings-panel" data-settings-panel="context" hidden>
-              <h3>上下文</h3><p>对话变长时上下文会被自动压缩，但没有任何东西被删除：压缩只是写入一段摘要并记下切点，原文仍在磁盘上。分身可以用 <code>search_history</code> 把它们找回来。</p>
+              <h3 data-i18n="context-title">上下文</h3><p data-i18n="context-lead">对话变长时上下文会被自动压缩，但没有任何东西被删除：压缩只是写入一段摘要并记下切点，原文仍在磁盘上。分身可以用 <code>search_history</code> 把它们找回来。</p>
               <div class="memory-overview" id="context-overview"></div>
               <div class="memory-tools">
-                <form class="memory-tool-row" id="context-search-form"><input id="context-search-query" type="text" placeholder="搜索完整对话历史，包括已被压缩掉的部分" aria-label="搜索对话历史"/><button type="submit">搜索历史</button></form>
+                <form class="memory-tool-row" id="context-search-form"><input id="context-search-query" type="text" placeholder="搜索完整对话历史，包括已被压缩掉的部分" aria-label="搜索对话历史" data-i18n="history-search-placeholder" data-i18n-attr="placeholder"/><button type="submit" data-i18n="search-history">搜索历史</button></form>
                 <div class="memory-search-results" id="context-search-results"></div>
               </div>
               <div class="memory-list" id="context-compactions"></div>
               <div class="memory-list" id="context-conversations"></div>
             </section>
             <section class="settings-panel" data-settings-panel="safety" hidden>
-              <h3>权限与安全</h3><p>分身可以准备和验证工作，但不能在未经确认的情况下影响外部世界。</p>
-              <div class="settings-card"><h4>外部动作确认</h4><p>发送、发布、提交、预约、购买等动作会暂停在最后一步，逐项等待你的确认。</p><span class="settings-value">始终要求确认</span></div>
-              <div class="settings-card"><h4>子 Agent 边界</h4><p>子 Agent 只能产出证据，不能获得个人记忆、权限策略或最终决策权。</p><span class="settings-value">Supervisor 治理</span></div>
+              <h3 data-i18n="safety-title">权限与安全</h3><p data-i18n="safety-lead">分身可以准备和验证工作，但不能在未经确认的情况下影响外部世界。</p>
+              <div class="settings-card"><h4 data-i18n="safety-external-title">外部动作确认</h4><p data-i18n="safety-external-body">发送、发布、提交、预约、购买等动作会暂停在最后一步，逐项等待你的确认。</p><span class="settings-value" data-i18n="safety-external-value">始终要求确认</span></div>
+              <div class="settings-card"><h4 data-i18n="safety-child-title">子 Agent 边界</h4><p data-i18n="safety-child-body">子 Agent 只能产出证据，不能获得个人记忆、权限策略或最终决策权。</p><span class="settings-value" data-i18n="safety-child-value">Supervisor 治理</span></div>
             </section>
             <section class="settings-panel" data-settings-panel="situation" hidden>
-              <h3>当前情境</h3><p>分身在每一轮开始时看到的东西：逾期与临近的承诺、进行中的目标、你声明过的边界，以及 Connector 观察到的内容。</p>
+              <h3 data-i18n="situation-title">当前情境</h3><p data-i18n="situation-lead">分身在每一轮开始时看到的东西：逾期与临近的承诺、进行中的目标、你声明过的边界，以及 Connector 观察到的内容。</p>
               <div class="situation-overview" id="situation-overview"></div>
-              <div class="agent-section-label">数据位置</div>
+              <div class="agent-section-label" data-i18n="data-location">数据位置</div>
               <div class="settings-card" id="config-paths"></div>
-              <div class="agent-section-label">工作目录</div>
-              <div class="memory-tool-row"><input id="config-workspace" type="text" placeholder="当前项目目录" aria-label="工作目录"/><button class="primary" id="config-workspace-save" type="button">保存</button></div>
-              <div class="agent-section-label">Main Agent 模型</div>
-              <div class="memory-tool-row"><input id="config-main-agent-model" type="text" placeholder="例如 anthropic/claude-sonnet-4-5（留空则用 Pi 默认）" aria-label="Main Agent 模型"/><button class="primary" id="config-main-agent-model-save" type="button">保存</button></div>
-              <div class="agent-section-label">观察来源 <button class="provider-install" id="connector-add" type="button">添加目录</button></div>
+              <div class="agent-section-label" data-i18n="interface-language">界面语言</div>
+              <div class="memory-tool-row"><select id="config-locale" aria-label="界面语言" data-i18n="language-label" data-i18n-attr="aria-label"><option value="zh-CN">中文</option><option value="en">English</option></select></div>
+              <div class="agent-section-label" data-i18n="working-directory">工作目录</div>
+              <div class="memory-tool-row"><input id="config-workspace" type="text" placeholder="当前项目目录" aria-label="工作目录" data-i18n="workspace-placeholder" data-i18n-attr="placeholder"/><button class="primary" id="config-workspace-save" type="button" data-i18n="save">保存</button></div>
+              <div class="agent-section-label" data-i18n="main-agent-model">Main Agent 模型</div>
+              <div class="memory-tool-row"><input id="config-main-agent-model" type="text" placeholder="例如 anthropic/claude-sonnet-4-5（留空则用 Pi 默认）" aria-label="Main Agent 模型" data-i18n="model-placeholder" data-i18n-attr="placeholder"/><button class="primary" id="config-main-agent-model-save" type="button" data-i18n="save">保存</button></div>
+              <div class="agent-section-label"><span data-i18n="observation-sources">观察来源</span> <button class="provider-install" id="connector-add" type="button" data-i18n="add-directory">添加目录</button></div>
               <div class="connector-list" id="connector-list"></div>
-              <p class="agent-runtime-note">Connector 只读：它把看到的内容作为事实交给分身，绝不会成为指令，也不会获得任何执行权限。配置只保存路径与环境变量名，绝不保存密钥值。</p>
+              <p class="agent-runtime-note" data-i18n="connectors-note">Connector 只读：它把看到的内容作为事实交给分身，绝不会成为指令，也不会获得任何执行权限。配置只保存路径与环境变量名，绝不保存密钥值。</p>
             </section>
           </div>
         </div>

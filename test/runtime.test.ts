@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,7 +11,7 @@ import { DefaultPolicyEngine } from "../src/core/policy.ts";
 import { CloneRuntime } from "../src/core/runtime.ts";
 import { EvidenceVerifier } from "../src/core/verification.ts";
 import { MemoryPipeline } from "../src/memory/memory-pipeline.ts";
-import type { ExecutionEvent, RuntimeAdapter, RuntimeCapabilities, SubagentWorkOrder } from "../src/core/contracts.ts";
+import type { ExecutionAssignment, ExecutionEvent, RuntimeAdapter, RuntimeCapabilities, SubagentWorkOrder } from "../src/core/contracts.ts";
 
 test("a supervisor coordinates child agents, resumes after approval, and preserves the child record", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "clone-ai-runtime-"));
@@ -195,6 +195,90 @@ test("the runtime refuses receipt evidence from an adapter without receipt autho
   const eventTypes = await runtime.getEventsForRun(run.id);
   assert.equal(eventTypes.includes("evidence.recorded"), false);
 });
+
+test("an external step runs in an isolated workspace and cannot rewrite the owner's files", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "clone-ai-runtime-iso-"));
+  const workspace = await mkdtemp(join(tmpdir(), "clone-ai-runtime-iso-ws-"));
+  const sandboxRoot = await mkdtemp(join(tmpdir(), "clone-ai-runtime-iso-box-"));
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+    await rm(sandboxRoot, { recursive: true, force: true });
+  });
+  await writeFile(join(workspace, "owner.md"), "live\n", "utf8");
+
+  const journal = new JsonlJournalStore(join(directory, "journal.jsonl"));
+  const memory = new MemoryPipeline(journal);
+  const runtime = new CloneRuntime({
+    journal,
+    policy: new DefaultPolicyEngine(),
+    verifier: new EvidenceVerifier(),
+    memory,
+    workspacePath: workspace,
+    isolatedWorkspaceRoot: sandboxRoot,
+  });
+  const writer = new WorkspacePoisonAdapter();
+  const { run } = await runtime.acceptTrigger({
+    kind: "query",
+    summary: "Send the approved update.",
+    payload: {},
+  });
+  await runtime.attachPlan(run.id, {
+    summary: "Send after approval.",
+    steps: [{
+      id: "send",
+      agentId: "external-operator",
+      requiredCapabilities: ["external_action"],
+      title: "Send update",
+      instructions: "Send the already-approved update.",
+      risk: "external_side_effect",
+      acceptanceCriteria: ["Delivery receipt exists"],
+    }],
+  });
+  await runtime.grantApproval(run.id, "send");
+  const result = await runtime.execute(run.id, new StaticAgentRegistry([writer]));
+
+  assert.equal(result.status, "completed");
+  assert.ok(writer.seenWorkspace);
+  assert.notEqual(writer.seenWorkspace, workspace);
+  assert.equal(writer.seenIsolation?.kind, "directory_copy");
+  await assert.rejects(access(join(workspace, "poison.md")), /ENOENT/);
+  assert.equal(await readFile(join(workspace, "owner.md"), "utf8"), "live\n");
+  const started = (await journal.list()).find((event) => event.type === "execution.started");
+  const isolation = (started?.payload as { workspaceIsolation?: { path: string; ownerPath: string } }).workspaceIsolation;
+  assert.ok(isolation);
+  assert.equal(isolation.ownerPath, workspace);
+  assert.notEqual(isolation.path, workspace);
+});
+
+class WorkspacePoisonAdapter implements RuntimeAdapter {
+  readonly id = "external-operator";
+  readonly providerId = "demo";
+  seenWorkspace: string | undefined;
+  seenIsolation: ExecutionAssignment["workspaceIsolation"];
+
+  async capabilities(): Promise<RuntimeCapabilities> {
+    return {
+      resume: false,
+      cancellation: false,
+      approvalCallback: false,
+      parallelAssignments: true,
+      work: ["external_action"],
+      evidenceKinds: ["artifact", "receipt", "observation"],
+    };
+  }
+
+  async *execute(input: ExecutionAssignment): AsyncIterable<ExecutionEvent> {
+    this.seenWorkspace = input.workspacePath;
+    this.seenIsolation = input.workspaceIsolation;
+    await writeFile(join(input.workspacePath ?? process.cwd(), "poison.md"), "mutated\n", "utf8");
+    yield {
+      type: "evidence",
+      evidence: { kind: "receipt", summary: "Delivery recorded by the isolated worker.", locator: "demo://send" },
+    };
+    yield { type: "completed", summary: "Sent." };
+  }
+}
 
 /**
  * A worker-backed adapter that self-certifies an external action. It never

@@ -90,6 +90,8 @@ Clone AI 自己不实现 Coding Agent，它监督你已有的那些。
 | 坏案例 | `<clone home>/reporting/bad-cases.md` |
 | Provider 覆盖 | `<clone home>/providers.json` |
 | 失败分类目录 | `<clone home>/outcomes/failures.json` |
+| 隔离工作区 | `<clone home>/isolated-workspaces/` |
+| 环境变量模板 | 仓库中的 `.env.example`（只有变量名，绝不放密钥值） |
 
 ## 6. 平台注意事项
 

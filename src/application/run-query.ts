@@ -19,6 +19,7 @@ import { buildMemoryContextFromCandidates } from "../main-agent/memory-context-b
 import { describeWorkers } from "../main-agent/worker-descriptors.ts";
 import { JournalDispatchRecorder } from "../main-agent/dispatch-recorder.ts";
 import type { DispatchBlockedCode } from "../main-agent/dispatch-contracts.ts";
+import { recordUsage } from "../observability/usage.ts";
 
 export interface QueryRunResult {
   runId: string;
@@ -176,13 +177,24 @@ async function runQueryWithin(
   // policy still produces a plan and states exactly why it chose that graph.
   // LLM Planner 是显式开启的。没有凭据时，确定性的本地策略仍会产出计划，
   // 并明确说明它为何选择当前任务图。
-  const plan = planner === undefined
-    ? buildFallbackPlan(query, new Set(routableAgents.map((agent) => agent.id)), recalledMemories)
-    : await planner.plan({
-      query,
-      recalledMemories,
-      availableAgents: planningAgents(routableAgents),
-    });
+  let plan;
+  if (planner === undefined) {
+    plan = buildFallbackPlan(query, new Set(routableAgents.map((agent) => agent.id)), recalledMemories);
+  } else {
+    const started = Date.now();
+    try {
+      plan = await planner.plan({
+        query,
+        recalledMemories,
+        availableAgents: planningAgents(routableAgents),
+      });
+    } finally {
+      await recordUsage(dataDirectory, planner.takeUsage?.() ?? {
+        source: "planner",
+        durationMs: Math.max(0, Date.now() - started),
+      });
+    }
+  }
   const workerDescriptors = describeWorkers(agents, workerStatuses);
   const routedPlan = assignWorkersPerStep(plan, routed.decision, workerDescriptors);
   // Each step's executor is journaled with its reason: a multi-agent plan is

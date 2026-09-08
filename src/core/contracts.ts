@@ -371,6 +371,15 @@ export interface ExecutionAssignment {
   /** Owner-editable failure taxonomy used only for diagnostics. 所有者可编辑的失败分类，仅用于诊断。 */
   failureCatalog?: OutcomeCatalog;
   workspacePath?: string;
+  /**
+   * Present when this assignment is not allowed to touch the owner's live tree.
+   * The worker's cwd is `workspacePath`; `ownerPath` is recorded for audit.
+   * 本次派发不得碰所有者活树时出现。Worker 的 cwd 是 `workspacePath`；`ownerPath` 记入审计。
+   */
+  workspaceIsolation?: {
+    kind: "git_worktree" | "directory_copy";
+    ownerPath: string;
+  };
 }
 
 export interface MemoryContextPacket {

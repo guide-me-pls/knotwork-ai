@@ -26,11 +26,17 @@ test("the config endpoint reports where the owner's data lives", async (t) => {
 
   const response = await companionFetch(url, token, "/api/config");
   assert.equal(response.status, 200);
-  const body = await response.json() as { config: { workspacePath: string; locale: string }; paths: Record<string, string> };
+  const body = await response.json() as {
+    config: { workspacePath: string; locale: string };
+    ui?: { locale: string; strings?: Record<string, string> };
+    paths: Record<string, string>;
+  };
 
   assert.equal(body.paths.dataDirectory, dataDirectory);
   assert.match(body.paths.providersFile, /providers\.json$/);
   assert.equal(body.config.locale, "zh-CN");
+  assert.equal(body.ui?.locale, "zh-CN");
+  assert.equal(body.ui?.strings?.["new-session"], "新建任务");
   // A settings payload must never become a place a credential could appear.
   // 设置响应绝不能成为凭据可能出现的地方。
   assert.doesNotMatch(JSON.stringify(body), /sk-|api[_-]?key["']?\s*[:=]\s*["'][^"']+/i);
@@ -52,6 +58,7 @@ test("the owner can change the workspace and locale through the API", async (t) 
   const reread = await (await companionFetch(url, token, "/api/config")).json() as { config: { workspacePath: string; locale: string } };
   assert.equal(reread.config.workspacePath, "/tmp/another-project");
   assert.equal(reread.config.locale, "en");
+  assert.equal((await (await companionFetch(url, token, "/api/config")).json() as { ui: { strings: Record<string, string> } }).ui.strings["new-session"], "New task");
 
   const empty = await companionFetch(url, token, "/api/config", {
     method: "PATCH",

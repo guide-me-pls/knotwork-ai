@@ -177,7 +177,7 @@ export interface WorkspaceSnapshotOptions {
   maxFiles?: number;
 }
 
-const DEFAULT_IGNORED = [
+export const WORKSPACE_IGNORED_DIRECTORIES = [
   ".git",
   ".clone",
   ".clone-ai",
@@ -190,6 +190,8 @@ const DEFAULT_IGNORED = [
   ".next",
   ".cache",
 ] as const;
+
+const DEFAULT_IGNORED = WORKSPACE_IGNORED_DIRECTORIES;
 
 const DEFAULT_MAX_FILES = 20_000;
 

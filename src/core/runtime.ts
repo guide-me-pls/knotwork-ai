@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type {
@@ -38,6 +39,11 @@ import {
   type WorkspaceCheckpointStore,
 } from "./workspace-evidence.ts";
 import { workspaceExecutionLock } from "./workspace-lock.ts";
+import {
+  prepareIsolatedWorkspace,
+  requiresIsolatedWorkspace,
+  type IsolatedWorkspace,
+} from "./isolated-workspace.ts";
 import { CLONE_DIRECTORY_NAME } from "../config/clone-home.ts";
 
 export interface CloneRuntimeOptions {
@@ -63,6 +69,12 @@ export interface CloneRuntimeOptions {
   workspaceCheckpointStore?: WorkspaceCheckpointStore;
   /** Optional directory used by the default checkpoint store. 默认检查点目录。 */
   workspaceCheckpointDirectory?: string;
+  /**
+   * Where external/irreversible steps get an isolated tree. Defaults to a temp
+   * directory so a missing option never sandboxes inside the owner's project.
+   * 外部/不可逆步骤获得隔离树的位置。默认用临时目录，避免漏传选项时沙箱落在所有者项目里。
+   */
+  isolatedWorkspaceRoot?: string;
   /**
    * The executor ids the Kernel will accept in a plan, resolved at proposal
    * time.
@@ -115,6 +127,7 @@ export class CloneRuntime {
   readonly #failureCatalog: OutcomeCatalog;
   readonly #workspacePath?: string;
   readonly #workspaceCheckpoints?: WorkspaceCheckpointStore;
+  readonly #isolatedWorkspaceRoot: string;
   readonly #knownAgentIds?: () => Set<string>;
   #state: RuntimeProjection = emptyProjection();
   #hydrated = false;
@@ -135,6 +148,7 @@ export class CloneRuntime {
           options.workspaceCheckpointDirectory
             ?? join(this.#workspacePath, CLONE_DIRECTORY_NAME, "workspace-checkpoints"),
         );
+    this.#isolatedWorkspaceRoot = resolve(options.isolatedWorkspaceRoot ?? join(tmpdir(), "clone-ai-isolated"));
   }
 
   async hydrate(): Promise<void> {
@@ -498,40 +512,43 @@ export class CloneRuntime {
       );
     }
     const memoryContext = await this.compileMemoryContext({ run: input.run, task: input.task, step: input.step });
-    const assignment: ExecutionAssignment = {
-      run: input.run,
-      task: input.task,
-      step: input.step,
-      executor: { agentId: adapter.id, providerId: adapter.providerId },
-      ...(memoryContext === undefined ? {} : { memoryContext }),
-      failureCatalog: this.#failureCatalog,
-      ...(this.#workspacePath === undefined ? {} : { workspacePath: this.#workspacePath }),
-    };
-    const executionAuthorization = evidenceAuthorization(capabilities);
-    await this.record({
-      type: "execution.started",
-      taskId: input.task.id,
-      runId: input.run.id,
-      payload: {
-        stepId: input.step.id,
-        adapterId: adapter.id,
-        providerId: adapter.providerId,
-        // The authorization snapshot makes the journal self-auditing: a later
-        // replay can verify every recorded evidence kind against what this
-        // adapter was actually allowed to record at dispatch time.
-        // 授权快照让 Journal 可以自审计：事后重放能对照派发时该 Adapter 实际被允许的
-        // 证据类型，校验每一条已记录的 Evidence。
-        authorizedEvidenceKinds: [...executionAuthorization],
-        memoryItemIds: memoryContext?.items.map((item) => item.id) ?? [],
-      },
+    await this.withExecutionWorkspace(input.step.risk, `${input.run.id}-${input.step.id}`, async (workspace) => {
+      const assignment: ExecutionAssignment = {
+        run: input.run,
+        task: input.task,
+        step: input.step,
+        executor: { agentId: adapter.id, providerId: adapter.providerId },
+        ...(memoryContext === undefined ? {} : { memoryContext }),
+        failureCatalog: this.#failureCatalog,
+        ...this.assignmentWorkspaceFields(workspace),
+      };
+      const executionAuthorization = evidenceAuthorization(capabilities);
+      await this.record({
+        type: "execution.started",
+        taskId: input.task.id,
+        runId: input.run.id,
+        payload: {
+          stepId: input.step.id,
+          adapterId: adapter.id,
+          providerId: adapter.providerId,
+          // The authorization snapshot makes the journal self-auditing: a later
+          // replay can verify every recorded evidence kind against what this
+          // adapter was actually allowed to record at dispatch time.
+          // 授权快照让 Journal 可以自审计：事后重放能对照派发时该 Adapter 实际被允许的
+          // 证据类型，校验每一条已记录的 Evidence。
+          authorizedEvidenceKinds: [...executionAuthorization],
+          memoryItemIds: memoryContext?.items.map((item) => item.id) ?? [],
+          ...isolationAudit(workspace),
+        },
+      });
+      const completion = await this.consumeExecutionEvents(adapter, assignment, executionAuthorization);
+      if (completion === undefined) {
+        throw new Error(`Agent ${agentId} ended without an explicit completion event.`);
+      }
+      if (!this.stepHasCompletedEvidence(input.run.id, input.step)) {
+        throw new Error(`Agent ${agentId} completed step ${input.step.id} without evidence.`);
+      }
     });
-    const completion = await this.consumeExecutionEvents(adapter, assignment, executionAuthorization);
-    if (completion === undefined) {
-      throw new Error(`Agent ${agentId} ended without an explicit completion event.`);
-    }
-    if (!this.stepHasCompletedEvidence(input.run.id, input.step)) {
-      throw new Error(`Agent ${agentId} completed step ${input.step.id} without evidence.`);
-    }
   }
 
   private async executeSubagents(input: { run: Run; task: Task; step: PlanStep; agents: AgentRegistry }): Promise<void> {
@@ -600,7 +617,6 @@ export class CloneRuntime {
       dependencyEvidence: this.dependencyEvidence(input.run.id, input.workOrder),
       ...(memoryContext === undefined ? {} : { memoryContext }),
       failureCatalog: this.#failureCatalog,
-      ...(this.#workspacePath === undefined ? {} : { workspacePath: this.#workspacePath }),
     };
     let allowedEvidenceKinds = evidenceAuthorization(await adapter.capabilities());
     const triedAdapterIds = new Set<string>();
@@ -638,10 +654,12 @@ export class CloneRuntime {
       }
     }
 
-    while (attempt <= input.workOrder.budget.maxAttempts) {
+    return this.withExecutionWorkspace(input.workOrder.risk, `${input.run.id}-${input.workOrder.id}`, async (workspace) => {
+      Object.assign(assignment, this.assignmentWorkspaceFields(workspace));
+      while (attempt <= input.workOrder.budget.maxAttempts) {
       if (existing === undefined && attempt === 1) {
         const startedAt = new Date().toISOString();
-        const workspaceCheckpoint = await this.saveWorkspaceCheckpoint(input, attempt);
+        const workspaceCheckpoint = await this.saveWorkspaceCheckpoint(input, attempt, workspace.path);
         const subagent: SubagentRun = {
           id: randomUUID(),
           runId: input.run.id,
@@ -653,7 +671,7 @@ export class CloneRuntime {
           title: input.workOrder.title,
           status: "running",
           ...(workspaceCheckpoint === undefined ? {} : { workspaceCheckpoint }),
-          ...(this.#workspacePath === undefined ? {} : { workspacePath: this.#workspacePath }),
+          ...(workspace.path === undefined ? {} : { workspacePath: workspace.path }),
           attempt,
           startedAt,
           updatedAt: startedAt,
@@ -662,7 +680,12 @@ export class CloneRuntime {
           type: "subagent.dispatched",
           taskId: input.task.id,
           runId: input.run.id,
-          payload: { ...subagent, authorizedEvidenceKinds: [...allowedEvidenceKinds], memoryItemIds: memoryContext?.items.map((item) => item.id) ?? [] },
+          payload: {
+            ...subagent,
+            authorizedEvidenceKinds: [...allowedEvidenceKinds],
+            memoryItemIds: memoryContext?.items.map((item) => item.id) ?? [],
+            ...isolationAudit(workspace),
+          },
         });
       } else {
         await this.record({
@@ -756,14 +779,50 @@ export class CloneRuntime {
       }
     }
     throw lastError instanceof Error ? lastError : new Error("Subagent exhausted its attempt budget.");
+    });
+  }
+
+  /**
+   * External/irreversible work gets a tree that is not the owner's. Reversible
+   * work keeps the live project so the owner can keep the files.
+   * 外部/不可逆工作拿到的不是所有者那棵树。可逆工作仍用活项目，所有者才能留下文件。
+   */
+  private async withExecutionWorkspace<T>(
+    risk: RiskClass,
+    key: string,
+    run: (workspace: { path?: string; isolation?: IsolatedWorkspace }) => Promise<T>,
+  ): Promise<T> {
+    if (this.#workspacePath === undefined || !requiresIsolatedWorkspace(risk)) {
+      return run({ path: this.#workspacePath });
+    }
+    const isolation = await prepareIsolatedWorkspace({
+      ownerPath: this.#workspacePath,
+      sandboxRoot: this.#isolatedWorkspaceRoot,
+      key,
+    });
+    try {
+      return await run({ path: isolation.path, isolation });
+    } finally {
+      await isolation.dispose();
+    }
+  }
+
+  private assignmentWorkspaceFields(workspace: { path?: string; isolation?: IsolatedWorkspace }): Pick<ExecutionAssignment, "workspacePath" | "workspaceIsolation"> {
+    return {
+      ...(workspace.path === undefined ? {} : { workspacePath: workspace.path }),
+      ...(workspace.isolation === undefined
+        ? {}
+        : { workspaceIsolation: { kind: workspace.isolation.kind, ownerPath: workspace.isolation.ownerPath } }),
+    };
   }
 
   private async saveWorkspaceCheckpoint(
     input: { run: Run; workOrder: SubagentWorkOrder },
     attempt: number,
+    workspaceRoot = this.#workspacePath,
   ): Promise<string | undefined> {
-    if (this.#workspacePath === undefined || this.#workspaceCheckpoints === undefined) return undefined;
-    const snapshot = await snapshotWorkspace(this.#workspacePath);
+    if (workspaceRoot === undefined || this.#workspaceCheckpoints === undefined) return undefined;
+    const snapshot = await snapshotWorkspace(workspaceRoot);
     return this.#workspaceCheckpoints.save(
       `${input.run.id}/${input.workOrder.id}/attempt-${attempt}`,
       snapshot,
@@ -1478,6 +1537,17 @@ function assertAcyclicWorkOrders(stepId: string, orders: SubagentWorkOrder[]): v
     visited.add(id);
   };
   for (const order of orders) visit(order.id);
+}
+
+function isolationAudit(workspace: { isolation?: IsolatedWorkspace }): Record<string, unknown> {
+  if (workspace.isolation === undefined) return {};
+  return {
+    workspaceIsolation: {
+      kind: workspace.isolation.kind,
+      path: workspace.isolation.path,
+      ownerPath: workspace.isolation.ownerPath,
+    },
+  };
 }
 
 function assertBudget(order: SubagentWorkOrder): void {

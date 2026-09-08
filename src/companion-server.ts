@@ -42,6 +42,7 @@ import {
   type ClonePaths,
 } from "./config/clone-home.ts";
 import { CloneConfigStore } from "./config/clone-config.ts";
+import { uiStrings } from "./desktop/ui-locale.ts";
 import { readConnectorSettings, writeConnectorSettings } from "./connectors/connector-registry.ts";
 import { compileBriefing } from "./main-agent/situation-briefing.ts";
 import { buildFallbackPlan } from "./planning/fallback-planner.ts";
@@ -387,10 +388,14 @@ async function handleRequest(
   }
   if (request.method === "GET" && url.pathname === "/api/config") {
     // Paths are shown so the owner can find and inspect their own data; no
-    // credential value is ever part of this payload.
+    // credential value is ever part of this payload. ui.strings follows
+    // config.locale so the desktop chrome is not stuck in one language.
     // 展示路径是为了让所有者能找到并检查自己的数据；该响应从不包含任何凭据值。
+    // ui.strings 跟随 config.locale，桌面框架文案就不会锁死在一种语言上。
+    const config = await context.config.get();
     sendJson(response, 200, {
-      config: await context.config.get(),
+      config,
+      ui: { locale: config.locale, strings: uiStrings(config.locale) },
       paths: {
         dataDirectory: context.paths.dataDirectory,
         workspacePath: context.paths.workspacePath,

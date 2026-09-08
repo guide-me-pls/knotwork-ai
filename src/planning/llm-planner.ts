@@ -1,5 +1,6 @@
 import type { AgentRole } from "../config/worker-settings.ts";
 import type { ArtifactContract, PlanStep, RiskClass, SubagentWorkOrder, WorkPlan } from "../core/contracts.ts";
+import type { UsageRecord } from "../observability/usage.ts";
 
 export type PlannedWork = Pick<WorkPlan, "summary" | "steps">;
 
@@ -29,10 +30,13 @@ export interface PlanningInput {
  */
 export interface StructuredPlannerModel {
   createWorkPlan(input: { planning: PlanningInput; correction?: string }): Promise<unknown>;
+  takeLastUsage?(): Partial<Omit<UsageRecord, "source" | "durationMs">> | undefined;
 }
 
 export interface WorkPlanner {
   plan(input: PlanningInput): Promise<PlannedWork>;
+  /** Token/duration snapshot from the last plan() call, if the model exposed one. 最近一次 plan() 的 token/时长快照（模型有数据时）。 */
+  takeUsage?(): UsageRecord | undefined;
 }
 
 /**
@@ -46,6 +50,7 @@ export interface WorkPlanner {
 export class LlmWorkPlanner implements WorkPlanner {
   readonly #model: StructuredPlannerModel;
   readonly #maxAttempts: number;
+  #lastUsage?: UsageRecord;
 
   constructor(model: StructuredPlannerModel, options: { maxAttempts?: number } = {}) {
     this.#model = model;
@@ -55,25 +60,40 @@ export class LlmWorkPlanner implements WorkPlanner {
     }
   }
 
+  takeUsage(): UsageRecord | undefined {
+    const usage = this.#lastUsage;
+    this.#lastUsage = undefined;
+    return usage;
+  }
+
   async plan(input: PlanningInput): Promise<PlannedWork> {
     let correction: string | undefined;
     let lastError: Error | undefined;
+    const started = Date.now();
 
-    for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
-      const proposed = await this.#model.createWorkPlan({ planning: input, correction });
-      try {
-        return decodePlan(proposed, input.availableAgents);
-      } catch (error: unknown) {
-        lastError = asError(error);
-        correction = [
-          "The previous work-plan proposal was rejected. Return a complete replacement through create_work_plan.",
-          "上一次工作计划不合法。请通过 create_work_plan 返回一份完整的替代计划。",
-          `Validation feedback: ${lastError.message}`,
-        ].join("\n");
+    try {
+      for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
+        const proposed = await this.#model.createWorkPlan({ planning: input, correction });
+        try {
+          return decodePlan(proposed, input.availableAgents);
+        } catch (error: unknown) {
+          lastError = asError(error);
+          correction = [
+            "The previous work-plan proposal was rejected. Return a complete replacement through create_work_plan.",
+            "上一次工作计划不合法。请通过 create_work_plan 返回一份完整的替代计划。",
+            `Validation feedback: ${lastError.message}`,
+          ].join("\n");
+        }
       }
-    }
 
-    throw new Error(`LLM planner could not produce a safe WorkPlan: ${lastError?.message ?? "unknown error"}`);
+      throw new Error(`LLM planner could not produce a safe WorkPlan: ${lastError?.message ?? "unknown error"}`);
+    } finally {
+      this.#lastUsage = {
+        source: "planner",
+        durationMs: Math.max(0, Date.now() - started),
+        ...this.#model.takeLastUsage?.(),
+      };
+    }
   }
 }
 
@@ -98,6 +118,7 @@ export class OpenAIResponsesPlannerModel implements StructuredPlannerModel {
   readonly #model: string;
   readonly #fetch: typeof fetch;
   readonly #retryDelaysMs: number[];
+  #lastUsage?: Partial<Omit<UsageRecord, "source" | "durationMs">>;
 
   constructor(options: OpenAIResponsesPlannerModelOptions) {
     if (options.apiKey.trim().length === 0) {
@@ -107,6 +128,12 @@ export class OpenAIResponsesPlannerModel implements StructuredPlannerModel {
     this.#model = options.model;
     this.#fetch = options.fetcher ?? fetch;
     this.#retryDelaysMs = options.retryDelaysMs ?? [200, 800];
+  }
+
+  takeLastUsage(): Partial<Omit<UsageRecord, "source" | "durationMs">> | undefined {
+    const usage = this.#lastUsage;
+    this.#lastUsage = undefined;
+    return usage;
   }
 
   async createWorkPlan(input: { planning: PlanningInput; correction?: string }): Promise<unknown> {
@@ -135,10 +162,12 @@ export class OpenAIResponsesPlannerModel implements StructuredPlannerModel {
       });
       const body = await response.json() as OpenAIResponse | OpenAIErrorResponse;
       if (response.ok) {
-        const call = (body as OpenAIResponse).output.find(isFunctionCall);
+        const ok = body as OpenAIResponse;
+        const call = ok.output.find(isFunctionCall);
         if (call === undefined || call.name !== "create_work_plan") {
           throw new Error("The planner response did not contain the required create_work_plan function call.");
         }
+        this.#lastUsage = usageFromResponse(ok, this.#model);
         return parseJsonObject(call.arguments, "planner function arguments");
       }
       lastError = new Error(`OpenAI Responses API error (${response.status}): ${readApiError(body)}`);
@@ -394,8 +423,30 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function usageFromResponse(
+  body: OpenAIResponse,
+  modelId: string,
+): Partial<Omit<UsageRecord, "source" | "durationMs">> {
+  const usage: Partial<Omit<UsageRecord, "source" | "durationMs">> = {
+    modelId,
+    provider: "openai",
+  };
+  const inputTokens = body.usage?.input_tokens;
+  const outputTokens = body.usage?.output_tokens;
+  const totalTokens = body.usage?.total_tokens;
+  if (typeof inputTokens === "number" && inputTokens > 0) usage.inputTokens = inputTokens;
+  if (typeof outputTokens === "number" && outputTokens > 0) usage.outputTokens = outputTokens;
+  if (typeof totalTokens === "number" && totalTokens > 0) usage.totalTokens = totalTokens;
+  return usage;
+}
+
 interface OpenAIResponse {
   output: unknown[];
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 interface OpenAIErrorResponse {

@@ -200,6 +200,16 @@ test("the worker prompt tells the agent that unsaved work counts as work not don
   assert.doesNotMatch(prompt, /CLONE_AI_EVIDENCE/);
 });
 
+test("an isolated assignment tells the worker it is not in the owner's live tree", () => {
+  const prompt = buildWorkerPrompt({
+    ...assignment("/tmp/sandbox"),
+    workspaceIsolation: { kind: "directory_copy", ownerPath: "/tmp/owner" },
+  });
+  assert.match(prompt, /Isolated working directory: directory_copy/);
+  assert.match(prompt, /\/tmp\/owner/);
+  assert.match(prompt, /Do not leave this directory/);
+});
+
 test("a .cmd shim is resolved to its real executable without a shell", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "clone-ai-shim-"));
   t.after(async () => rm(directory, { recursive: true, force: true }));

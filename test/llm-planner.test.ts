@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { runQuery } from "../src/application/run-query.ts";
+import { createJournalStore } from "../src/core/sqlite-journal.ts";
 import { createScriptedAgentRegistry } from "./fixtures/scripted-adapter.ts";
 import { LlmWorkPlanner, OpenAIResponsesPlannerModel, type PlanningAgent, type StructuredPlannerModel } from "../src/planning/llm-planner.ts";
 
@@ -103,6 +104,25 @@ test("OpenAI Responses planner forces exactly one structured function call", asy
   assert.equal((proposal as { summary?: string }).summary, "Answer directly.");
 });
 
+test("OpenAI Responses planner copies token usage from the API body", async () => {
+  const model = new OpenAIResponsesPlannerModel({
+    apiKey: "test-key",
+    model: "test-model",
+    fetcher: async () => new Response(JSON.stringify({
+      output: [{ type: "function_call", name: "create_work_plan", arguments: JSON.stringify(directPlan()) }],
+      usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  });
+
+  await model.createWorkPlan({ planning: { query: "解释术语", recalledMemories: [], availableAgents: agents } });
+  const usage = model.takeLastUsage();
+  assert.equal(usage?.modelId, "test-model");
+  assert.equal(usage?.provider, "openai");
+  assert.equal(usage?.inputTokens, 11);
+  assert.equal(usage?.outputTokens, 7);
+  assert.equal(usage?.totalTokens, 18);
+});
+
 test("OpenAI Responses planner retries 429 then succeeds", async () => {
   let calls = 0;
   const model = new OpenAIResponsesPlannerModel({
@@ -165,6 +185,15 @@ test("workflow uses an injected LLM planner before it dispatches an executor", a
 
     assert.equal(result.status, "completed");
     assert.equal(model.corrections.length, 1);
+    const journal = createJournalStore(directory);
+    try {
+      const usage = (await journal.list()).filter((event) => event.type === "usage.recorded");
+      assert.ok(usage.length >= 1, "the planner turn must land in the journal");
+      assert.equal((usage[0]?.payload as { source?: string }).source, "planner");
+      assert.equal(typeof (usage[0]?.payload as { durationMs?: number }).durationMs, "number");
+    } finally {
+      (journal as { close?: () => void }).close?.();
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
