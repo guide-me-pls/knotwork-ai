@@ -130,11 +130,27 @@ test("config writes are atomic and leave no partial file behind", async (t) => {
   const updated = await store.update({ workspacePath: "/somewhere/else", locale: "en" });
   assert.equal(updated.workspacePath, "/somewhere/else");
   assert.equal(updated.locale, "en");
+  assert.equal(updated.mainAgentModel, undefined);
 
+  const withModel = await store.update({ mainAgentModel: "anthropic/claude-sonnet-4-5" });
+  assert.equal(withModel.mainAgentModel, "anthropic/claude-sonnet-4-5");
   const reloaded = await store.get();
-  assert.deepEqual(reloaded, updated);
+  assert.deepEqual(reloaded, withModel);
   const raw = JSON.parse(await readFile(paths.configFile, "utf8")) as { version: number };
   assert.equal(raw.version, 1);
+});
+
+test("CLONE_AI_MAIN_MODEL overrides config.json for the Main Agent model", async (t) => {
+  const home = await tempDirectory(t, "clone-home-");
+  const workspace = await tempDirectory(t, "clone-ws-");
+  const paths = resolveClonePaths({ dataDirectory: join(home, ".clone"), workspacePath: workspace });
+  await new CloneConfigStore(paths).update({ mainAgentModel: "from-config" });
+  const { readMainAgentModelPreference } = await import("../src/main-agent/session.ts");
+  assert.equal(await readMainAgentModelPreference(paths.dataDirectory, {}), "from-config");
+  assert.equal(
+    await readMainAgentModelPreference(paths.dataDirectory, { CLONE_AI_MAIN_MODEL: "from-env" }),
+    "from-env",
+  );
 });
 
 test("a third-party provider is stored, listed with built-ins, and removed", async (t) => {

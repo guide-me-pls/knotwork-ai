@@ -11,6 +11,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
@@ -18,6 +19,8 @@ import {
 import { createKernelToolsExtension } from "./tools/kernel-tools.ts";
 import { compileBriefing } from "./situation-briefing.ts";
 import { createJournalStore } from "../core/sqlite-journal.ts";
+import { CloneConfigStore } from "../config/clone-config.ts";
+import { resolveClonePaths } from "../config/clone-home.ts";
 
 export interface MainAgentSessionOptions {
   dataDirectory: string;
@@ -101,11 +104,13 @@ export async function createMainAgentSession(options: MainAgentSessionOptions): 
   });
   await resourceLoader.reload();
 
+  const configured = await resolveMainAgentModel(options.dataDirectory);
   const { session } = await createAgentSession({
     resourceLoader,
     // noTools: "builtin" disables built-in tools while keeping extension tools active.
     //          （tools: [] 会把扩展工具也过滤掉；noTools: "builtin" 只禁用内置工具。）
     noTools: "builtin",
+    ...(configured === undefined ? {} : { model: configured.model, modelRuntime: configured.modelRuntime }),
     // The session identity is the owner's clone home, not the current folder.
     // Pi filters recent sessions by cwd when a custom session directory is
     // given, so passing the real cwd would start a blank conversation every
@@ -115,6 +120,47 @@ export async function createMainAgentSession(options: MainAgentSessionOptions): 
     sessionManager: options.sessionManager ?? await continueOwnerConversation(options.dataDirectory),
   });
   return { session };
+}
+
+/**
+ * Env wins for one-off runs; otherwise `config.json` `mainAgentModel`.
+ * Unset means the Pi SDK default — we do not invent a model id.
+ * 一次性运行以环境变量为准；否则用 `config.json` 的 `mainAgentModel`。
+ * 未设置则交给 Pi SDK 默认——我们不编造模型 id。
+ */
+export async function readMainAgentModelPreference(
+  dataDirectory: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> {
+  const fromEnv = environment.CLONE_AI_MAIN_MODEL?.trim();
+  if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+  const paths = resolveClonePaths({ dataDirectory });
+  const config = await new CloneConfigStore(paths).get();
+  return config.mainAgentModel;
+}
+
+async function resolveMainAgentModel(dataDirectory: string): Promise<{
+  model: ReturnType<ModelRuntime["getModels"]>[number];
+  modelRuntime: ModelRuntime;
+} | undefined> {
+  const reference = await readMainAgentModelPreference(dataDirectory);
+  if (reference === undefined) return undefined;
+  const modelRuntime = await ModelRuntime.create({ refreshOnCreate: false, allowModelNetwork: false });
+  const model = findConfiguredModel(reference, modelRuntime.getModels());
+  if (model === undefined) {
+    throw new Error(
+      `Main Agent model "${reference}" is not in the Pi catalog. Set config.json mainAgentModel (or CLONE_AI_MAIN_MODEL) to a known provider/model id, for example anthropic/claude-sonnet-4-5.`,
+    );
+  }
+  return { model, modelRuntime };
+}
+
+function findConfiguredModel<T extends { id: string; provider: string }>(
+  reference: string,
+  models: readonly T[],
+): T | undefined {
+  const matches = models.filter((model) => model.id === reference || `${model.provider}/${model.id}` === reference);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /**

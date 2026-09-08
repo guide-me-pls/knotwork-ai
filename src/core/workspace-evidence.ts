@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 export interface WorkspaceSnapshot {
   /** Absolute root that was observed. 实际被观察的绝对根目录。 */
@@ -8,6 +8,13 @@ export interface WorkspaceSnapshot {
   /** Relative path -> content hash. 相对路径 -> 内容哈希。 */
   files: Map<string, string>;
   takenAt: string;
+}
+
+export interface RestoreResult {
+  restored: string[];
+  skipped: string[];
+  /** Why some files could not come back. 部分文件无法还原的原因。 */
+  skippedReason?: string;
 }
 
 /**
@@ -19,6 +26,13 @@ export interface WorkspaceSnapshot {
 export interface WorkspaceCheckpointStore {
   save(key: string, snapshot: WorkspaceSnapshot): Promise<string>;
   load(locator: string): Promise<WorkspaceSnapshot | undefined>;
+  /**
+   * Writes stored file copies back. Hash-only checkpoints (legacy JSON with no
+   * sidecar) return skipped files and do not invent contents.
+   * 把已存储的文件副本写回去。仅哈希的检查点（没有 sidecar 的旧 JSON）返回跳过的
+   * 文件，绝不编造内容。
+   */
+  restore(locator: string, root: string): Promise<RestoreResult | undefined>;
 }
 
 /**
@@ -46,6 +60,7 @@ export class JsonWorkspaceCheckpointStore implements WorkspaceCheckpointStore {
     };
     await writeFile(temporary, `${JSON.stringify(serializable, null, 2)}\n`, "utf8");
     await rename(temporary, target);
+    await this.persistFileCopies(locator, snapshot);
     return locator;
   }
 
@@ -81,6 +96,72 @@ export class JsonWorkspaceCheckpointStore implements WorkspaceCheckpointStore {
       files,
       takenAt: parsed.takenAt,
     };
+  }
+
+  async restore(locator: string, root: string): Promise<RestoreResult | undefined> {
+    const snapshot = await this.load(locator);
+    if (snapshot === undefined) return undefined;
+    const filesDir = this.filesDirectory(locator);
+    let stored: Set<string>;
+    try {
+      stored = await listStoredFiles(filesDir);
+    } catch (error: unknown) {
+      if (isMissingFile(error)) {
+        return {
+          restored: [],
+          skipped: [...snapshot.files.keys()],
+          skippedReason: "hash-only checkpoint; file contents were not stored",
+        };
+      }
+      throw error;
+    }
+    const restored: string[] = [];
+    const skipped: string[] = [];
+    const destination = resolve(root);
+    for (const relativePath of snapshot.files.keys()) {
+      if (!isSafeRelativePath(relativePath) || !stored.has(relativePath)) {
+        skipped.push(relativePath);
+        continue;
+      }
+      const from = join(filesDir, ...relativePath.split("/"));
+      const to = join(destination, ...relativePath.split("/"));
+      await mkdir(dirname(to), { recursive: true });
+      await copyFile(from, to);
+      restored.push(relativePath);
+    }
+    return {
+      restored,
+      skipped,
+      ...(skipped.length === 0 ? {} : { skippedReason: "large or unreadable files are hash-only and cannot be restored" }),
+    };
+  }
+
+  private filesDirectory(locator: string): string {
+    return join(this.#directory, `${locator}.files`);
+  }
+
+  /**
+   * Copies small hashed files beside the JSON. Large files stay hash-only —
+   * restoring them would cost more than the work being supervised.
+   * 把已哈希的小文件复制到 JSON 旁边。大文件仍只记哈希——还原它们的成本会超过被监督的工作。
+   */
+  private async persistFileCopies(locator: string, snapshot: WorkspaceSnapshot): Promise<void> {
+    if (snapshot.root === undefined) return;
+    const filesDir = this.filesDirectory(locator);
+    await mkdir(filesDir, { recursive: true });
+    for (const [relativePath, hash] of snapshot.files) {
+      if (!isSafeRelativePath(relativePath)) continue;
+      if (hash.startsWith("meta:") || hash === "unreadable") continue;
+      const from = join(snapshot.root, ...relativePath.split("/"));
+      const to = join(filesDir, ...relativePath.split("/"));
+      try {
+        await mkdir(dirname(to), { recursive: true });
+        await copyFile(from, to);
+      } catch {
+        // A file that vanished between hash and copy is not a restoreable baseline.
+        // 在哈希与复制之间消失的文件，不能当作可还原基线。
+      }
+    }
   }
 }
 
@@ -190,6 +271,30 @@ export function describeChanges(changes: readonly WorkspaceChange[], limit = 20)
 
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function isSafeRelativePath(path: string): boolean {
+  if (path.length === 0 || path.startsWith("/") || path.includes("\0")) return false;
+  const parts = path.split("/");
+  return parts.every((part) => part.length > 0 && part !== "." && part !== "..");
+}
+
+async function listStoredFiles(root: string): Promise<Set<string>> {
+  const files = new Set<string>();
+  const walk = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolute);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      files.add(relative(root, absolute).split(sep).join("/"));
+    }
+  };
+  await walk(root);
+  return files;
 }
 
 async function hashFile(path: string): Promise<string> {

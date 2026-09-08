@@ -32,6 +32,8 @@ import { readJsonFile } from "./config/json-file.ts";
 import { MdMemoryStore, GovernedMemorySource } from "./memory/md-memory-store.ts";
 import type { JournalStore } from "./core/journal.ts";
 import type { CloneRuntime } from "./core/runtime.ts";
+import { logJson } from "./observability/json-log.ts";
+import { emptyRunMetrics, summarizeRuns } from "./observability/run-metrics.ts";
 import {
   defaultLegacyDirectory,
   migrateLegacyCloneHome,
@@ -152,7 +154,10 @@ export async function startCompanionServer(options: CompanionServerOptions = {})
     journal,
     registry: async () => createConfiguredAgentRegistry((await agentSettings.get()).agents, { dataDirectory, workspacePath }),
     onError: (runId, error) => {
-      console.error(`Run ${runId} failed: ${error instanceof Error ? error.message : String(error)}`);
+      logJson("error", "Run failed", {
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     },
   });
   runQueue.start();
@@ -342,12 +347,21 @@ async function handleRequest(
     } catch {
       journal = "error";
     }
+    let runs = emptyRunMetrics();
+    try {
+      await context.runtime.refresh();
+      runs = summarizeRuns(context.runtime.listRuns());
+    } catch {
+      // Health still answers; missing run counts are better than a 500.
+      // Health 仍然应答；缺 Run 计数好过 500。
+    }
     sendJson(response, journal === "ok" ? 200 : 503, {
       ok: journal === "ok",
       pid: process.pid,
       uptimeMs: Date.now() - context.startedAt,
       journal,
       queue: { inFlight: context.runQueue.inFlight().length },
+      runs,
     });
     return;
   }
@@ -392,13 +406,20 @@ async function handleRequest(
 
   if (request.method === "PATCH" && url.pathname === "/api/config") {
     const body = await readJsonBody(request);
-    const update: { workspacePath?: string; locale?: "zh-CN" | "en" } = {};
+    const update: { workspacePath?: string; locale?: "zh-CN" | "en"; mainAgentModel?: string } = {};
     if (typeof body.workspacePath === "string" && body.workspacePath.trim().length > 0) {
       update.workspacePath = body.workspacePath.trim();
     }
     if (body.locale === "zh-CN" || body.locale === "en") update.locale = body.locale;
+    if ("mainAgentModel" in body) {
+      if (typeof body.mainAgentModel !== "string") {
+        sendJson(response, 400, { error: "mainAgentModel must be a string (empty clears it)." });
+        return;
+      }
+      update.mainAgentModel = body.mainAgentModel.trim();
+    }
     if (Object.keys(update).length === 0) {
-      sendJson(response, 400, { error: "Provide a workspacePath or a locale to change." });
+      sendJson(response, 400, { error: "Provide a workspacePath, locale, or mainAgentModel to change." });
       return;
     }
     sendJson(response, 200, { config: await context.config.update(update) });
@@ -1495,7 +1516,9 @@ if (process.argv[1]?.replaceAll("\\", "/").endsWith("/companion-server.ts") === 
       process.once("SIGTERM", shutdown);
     })
     .catch((error: unknown) => {
-      console.error(error);
+      logJson("error", "companion failed to start", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       process.exitCode = 1;
     });
 }

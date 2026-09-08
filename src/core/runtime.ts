@@ -853,15 +853,6 @@ export class CloneRuntime {
         ...checkpoint,
       };
     }
-    if (changes.some((change) => change.change === "deleted")) {
-      return {
-        decision: "blocked",
-        category: "partial_side_effect",
-        reason: `Recovery found deleted files and cannot safely rerun: ${changeSummary}.`,
-        changes,
-        ...checkpoint,
-      };
-    }
 
     const requiredArtifacts = input.workOrder.expectedArtifacts.filter((artifact) => artifact.required);
     const canObserveArtifacts = allowedEvidenceKinds.has("artifact")
@@ -876,6 +867,40 @@ export class CloneRuntime {
         ...checkpoint,
       };
     }
+
+    // Reversible work may be rolled back to the pre-dispatch copies when they
+    // exist. External and irreversible steps must not be rerun after a restore:
+    // that would duplicate a side effect the Kernel cannot see.
+    // 可逆工作在派发前副本还在时可以滚回去。外部与不可逆步骤不得在还原后再跑：
+    // 那会复制 Kernel 看不见的副作用。
+    if (
+      input.workOrder.risk === "reversible_write"
+      && checkpointLocator !== undefined
+      && this.#workspacePath !== undefined
+      && this.#workspaceCheckpoints !== undefined
+    ) {
+      const restored = await this.#workspaceCheckpoints.restore(checkpointLocator, this.#workspacePath);
+      if (restored !== undefined && restored.restored.length > 0) {
+        return {
+          decision: "rerun",
+          category: "recovery_blocked",
+          reason: `Restored ${restored.restored.length} file(s) from the pre-dispatch checkpoint; a fresh session may rerun it.`,
+          changes,
+          ...checkpoint,
+        };
+      }
+    }
+
+    if (changes.some((change) => change.change === "deleted")) {
+      return {
+        decision: "blocked",
+        category: "partial_side_effect",
+        reason: `Recovery found deleted files and cannot safely rerun: ${changeSummary}.`,
+        changes,
+        ...checkpoint,
+      };
+    }
+
     return {
       decision: "blocked",
       category: "partial_side_effect",

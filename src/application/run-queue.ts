@@ -20,6 +20,7 @@ import type { AgentRegistry } from "../core/contracts.ts";
 import type { CloneRuntime } from "../core/runtime.ts";
 import type { JournalStore } from "../core/journal.ts";
 import { reconcileCommitments } from "../state/commitment-reconciler.ts";
+import { logJson } from "../observability/json-log.ts";
 
 export interface RunQueueOptions {
   runtime: CloneRuntime;
@@ -115,7 +116,9 @@ export class RunQueueConsumer {
         // Recovery failing must not stop the tick from running the healthy
         // queue; the next tick retries the recovery itself.
         // 恢复失败不能阻止本次 tick 运行健康的队列；下一次 tick 会重试恢复本身。
-        console.error(`clone-ai: orphan recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+        logJson("error", "orphan recovery failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       const queued = this.#options.runtime.listRuns().filter((run) => run.status === "queued");
       for (const run of queued) {

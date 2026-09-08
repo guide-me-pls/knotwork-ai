@@ -127,6 +127,8 @@
               <div class="settings-card" id="config-paths"></div>
               <div class="agent-section-label">工作目录</div>
               <div class="memory-tool-row"><input id="config-workspace" type="text" placeholder="当前项目目录" aria-label="工作目录"/><button class="primary" id="config-workspace-save" type="button">保存</button></div>
+              <div class="agent-section-label">Main Agent 模型</div>
+              <div class="memory-tool-row"><input id="config-main-agent-model" type="text" placeholder="例如 anthropic/claude-sonnet-4-5（留空则用 Pi 默认）" aria-label="Main Agent 模型"/><button class="primary" id="config-main-agent-model-save" type="button">保存</button></div>
               <div class="agent-section-label">观察来源 <button class="provider-install" id="connector-add" type="button">添加目录</button></div>
               <div class="connector-list" id="connector-list"></div>
               <p class="agent-runtime-note">Connector 只读：它把看到的内容作为事实交给分身，绝不会成为指令，也不会获得任何执行权限。配置只保存路径与环境变量名，绝不保存密钥值。</p>

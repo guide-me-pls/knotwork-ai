@@ -10,6 +10,7 @@ import type { Run } from "../core/contracts.ts";
 import { createKernelRuntime } from "../main-agent/tools/kernel-tools.ts";
 import { createMainAgentSession } from "../main-agent/session.ts";
 import { withMainAgentLock } from "../main-agent/prompt-lock.ts";
+import { collectSessionUsage, recordUsage } from "../observability/usage.ts";
 
 export interface MainAgentQueryResult {
   reply: string;
@@ -53,9 +54,17 @@ export async function runMainAgentQuery(
         }
       }
     });
+    const started = Date.now();
+    const beforeStats = readSessionStats(session);
     try {
       await session.prompt(text);
     } finally {
+      try {
+        await recordUsage(dataDirectory, collectSessionUsage(session, Date.now() - started, beforeStats));
+      } catch {
+        // Usage is telemetry; losing it must not hide the reply or the error.
+        // 用量是遥测；丢掉它不能盖住回复或错误。
+      }
       session.dispose();
     }
 
@@ -66,4 +75,12 @@ export async function runMainAgentQuery(
       .map((run) => ({ id: run.id, status: run.status, planId: run.planId }));
     return { reply: reply.trim(), newRuns };
   });
+}
+
+function readSessionStats(session: { getSessionStats(): { tokens: { input: number; output: number; total: number }; cost: number } }) {
+  try {
+    return session.getSessionStats();
+  } catch {
+    return undefined;
+  }
 }

@@ -314,7 +314,12 @@ export type JournalEventType =
   | "opportunity.proposed"
   | "opportunity.resolved"
   | "agent.installed"
-  | "agent.install_failed";
+  | "agent.install_failed"
+  // Model turn cost/duration. Copied from session metadata when the SDK has
+  // tokens; otherwise duration and model id still land so the ledger is not empty.
+  // 模型回合的费用/时长。SDK 有 token 时从会话元数据抄来；否则仍记下时长与模型 id，
+  // 账本不会是空的。
+  | "usage.recorded";
 
 export interface JournalEvent {
   id: string;

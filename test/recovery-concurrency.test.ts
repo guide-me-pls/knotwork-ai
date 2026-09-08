@@ -111,7 +111,7 @@ function workOrder(id: string, agentId = "worker"): SubagentWorkOrder {
 
 async function prepareInterruptedRun(
   t: { after(callback: () => void | Promise<void>): void },
-  options: { baselineFile?: string; risk?: "read_only" | "reversible_write" } = {},
+  options: { baselineFile?: string; risk?: "read_only" | "reversible_write"; hashOnly?: boolean } = {},
 ): Promise<{
   directory: string;
   workspace: string;
@@ -161,6 +161,9 @@ async function prepareInterruptedRun(
   });
 
   const checkpoint = await store.save(`${run.id}/${order.id}/attempt-1`, await snapshotWorkspace(workspace));
+  if (options.hashOnly === true) {
+    await rm(join(directory, "workspace-checkpoints", `${checkpoint}.files`), { recursive: true, force: true });
+  }
   const now = new Date().toISOString();
   await journal.append({
     type: "run.status_changed",
@@ -216,8 +219,32 @@ test("a restarted Kernel reruns a black-box task only after confirming no Worksp
   assert.ok(events.includes("subagent.resumed"));
 });
 
-test("a deleted file after a black-box crash blocks automatic recovery", async (t) => {
+test("a deleted file after a black-box crash is restored from checkpoint then rerun", async (t) => {
   const prepared = await prepareInterruptedRun(t, { baselineFile: "out/original.md" });
+  await rm(join(prepared.workspace, "out/original.md"));
+  const adapter = new RecoveringAdapter("out/recovered.md");
+  const journal = new JsonlJournalStore(join(prepared.directory, "journal.jsonl"));
+  const runtime = new CloneRuntime({
+    journal,
+    policy: new DefaultPolicyEngine(),
+    verifier: new EvidenceVerifier(),
+    memory: new MemoryPipeline(journal),
+    workspacePath: prepared.workspace,
+    workspaceCheckpointStore: prepared.store,
+  });
+
+  const result = await runtime.execute(prepared.runId, new StaticAgentRegistry([adapter]));
+
+  assert.equal(result.status, "completed");
+  assert.equal(adapter.calls, 1);
+  assert.equal(await readFile(join(prepared.workspace, "out/original.md"), "utf8"), "before");
+  const events = await journal.list();
+  const recovery = events.find((event) => event.type === "subagent.recovery_decided");
+  assert.equal((recovery?.payload as { decision?: string }).decision, "rerun");
+});
+
+test("a hash-only checkpoint still blocks recovery when files were deleted", async (t) => {
+  const prepared = await prepareInterruptedRun(t, { baselineFile: "out/original.md", hashOnly: true });
   await rm(join(prepared.workspace, "out/original.md"));
   const adapter = new RecoveringAdapter("out/should-not-run.md");
   const journal = new JsonlJournalStore(join(prepared.directory, "journal.jsonl"));
@@ -234,11 +261,9 @@ test("a deleted file after a black-box crash blocks automatic recovery", async (
 
   assert.equal(result.status, "failed");
   assert.equal(adapter.calls, 0);
-  assert.equal((await runtime.getSubagentsForRun(prepared.runId))[0]?.status, "failed");
   const events = await journal.list();
   const recovery = events.find((event) => event.type === "subagent.recovery_decided");
   assert.equal((recovery?.payload as { decision?: string }).decision, "blocked");
-  assert.equal((recovery?.payload as { category?: string }).category, "partial_side_effect");
 });
 
 test("a complete file left by a crashed black box is reconciled without a second process", async (t) => {

@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { JournalEvent, NewJournalEvent } from "./contracts.ts";
 import { JsonlJournalStore, type JournalStore, type RunClaim } from "./journal.ts";
 import { assertJournalInvariants } from "./invariants.ts";
+import { logJson } from "../observability/json-log.ts";
 
 /**
  * The same JournalStore contract on SQLite. WAL mode gives the local daemon
@@ -278,9 +279,9 @@ export function createJournalStore(dataDirectory: string): JournalStore {
     // A legacy file that fails validation keeps being used as-is: falling
     // back to the old store beats starting a blank new one.
     // 校验失败的旧文件继续原样使用：退回旧存储总好过开一本空白新账。
-    console.error(
-      `clone-ai: could not import the legacy journal (${error instanceof Error ? error.message : String(error)}); continuing with journal.jsonl.`,
-    );
+    logJson("error", "legacy journal import failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return new JsonlJournalStore(jsonlPath);
   }
   return new SqliteJournalStore(sqlitePath);

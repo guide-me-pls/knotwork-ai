@@ -7,7 +7,7 @@ import { createJournalStore } from "./sqlite-journal.ts";
 import { DefaultPolicyEngine } from "./policy.ts";
 import { CloneRuntime } from "./runtime.ts";
 import { JsonWorkspaceCheckpointStore } from "./workspace-evidence.ts";
-import { EvidenceVerifier } from "./verification.ts";
+import { createDefaultVerifier } from "./verification.ts";
 import { MemoryPipeline } from "../memory/memory-pipeline.ts";
 import { AgentMemoryWorker } from "../memory/agent-memory-worker.ts";
 import { GovernedMemorySource } from "../memory/md-memory-store.ts";
@@ -75,7 +75,7 @@ export async function createRuntimeAssembly(options: ClonePathOptions = {}): Pro
   const runtime = new CloneRuntime({
     journal,
     policy: new DefaultPolicyEngine(),
-    verifier: new EvidenceVerifier({ workspacePath: paths.workspacePath }),
+    verifier: createDefaultVerifier({ workspacePath: paths.workspacePath }),
     memory,
     failureCatalog,
     // Recall comes from the governed store only: promoted memories, never raw

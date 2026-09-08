@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
 import type { Evidence, PlanStep, Verifier, VerificationResult } from "./contracts.ts";
+import { DiffFileVerifier, TestCommandVerifier } from "./verifier-plugins.ts";
 
 /**
  * What an acceptance criterion can be checked against on this machine.
@@ -184,4 +185,52 @@ export class EvidenceVerifier implements Verifier {
     }
     return `"${expectation.path}" was promised but does not exist on disk`;
   }
+}
+
+/**
+ * Runs every Verifier and fails if any of them failed. Empty summaries from
+ * plugins that had nothing to check are dropped so the owner sees the file
+ * contract, not three "nothing to do" sentences.
+ * 跑完每一个 Verifier，任一失败则整体失败。没有东西可检查的插件会交出空摘要，
+ * 丢掉它们，所有者看到的是文件契约，而不是三句“无事可做”。
+ */
+export class CompositeVerifier implements Verifier {
+  readonly #verifiers: readonly Verifier[];
+
+  constructor(verifiers: readonly Verifier[]) {
+    this.#verifiers = verifiers;
+  }
+
+  async verify(input: Parameters<Verifier["verify"]>[0]): Promise<VerificationResult> {
+    const results: VerificationResult[] = [];
+    for (const verifier of this.#verifiers) {
+      results.push(await verifier.verify(input));
+    }
+    const failures = results.filter((result) => !result.passed);
+    const passed = failures.length === 0;
+    const summaries = (passed ? results : failures)
+      .map((result) => result.summary.trim())
+      .filter((summary) => summary.length > 0);
+    return {
+      runId: input.run.id,
+      passed,
+      summary: passed
+        ? (summaries.join(" ") || `Verified ${input.plan.steps.length} step(s).`)
+        : `Verification failed. ${summaries.join("; ")}`,
+      checkedEvidenceIds: [...new Set(results.flatMap((result) => result.checkedEvidenceIds))],
+      createdAt: new Date().toISOString(),
+    };
+  }
+}
+
+/**
+ * Production Verifier: file contracts, receipt gate, then the test/diff plugins.
+ * 生产 Verifier：文件契约、Receipt 闸门，然后是测试 / diff 插件。
+ */
+export function createDefaultVerifier(options: { workspacePath?: string } = {}): Verifier {
+  return new CompositeVerifier([
+    new EvidenceVerifier(options),
+    new TestCommandVerifier(options),
+    new DiffFileVerifier(options),
+  ]);
 }

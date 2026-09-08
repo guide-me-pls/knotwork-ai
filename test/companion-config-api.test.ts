@@ -61,6 +61,29 @@ test("the owner can change the workspace and locale through the API", async (t) 
   assert.equal(empty.status, 400);
 });
 
+test("the owner can set and clear the Main Agent model in config.json", async (t) => {
+  const { url, token } = await companion(t);
+
+  const updated = await companionFetch(url, token, "/api/config", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mainAgentModel: "anthropic/claude-sonnet-4-5" }),
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(
+    (await updated.json() as { config: { mainAgentModel?: string } }).config.mainAgentModel,
+    "anthropic/claude-sonnet-4-5",
+  );
+
+  const cleared = await companionFetch(url, token, "/api/config", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mainAgentModel: "  " }),
+  });
+  assert.equal(cleared.status, 200);
+  assert.equal((await cleared.json() as { config: { mainAgentModel?: string } }).config.mainAgentModel, undefined);
+});
+
 test("a third-party agent is added, listed, and removed without touching source", async (t) => {
   const { url, token } = await companion(t);
 

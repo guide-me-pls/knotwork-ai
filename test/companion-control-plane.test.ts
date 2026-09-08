@@ -26,10 +26,18 @@ test("health is public; approve without a bearer is 401", async (t) => {
 
   const health = await fetch(`${url}/api/health`);
   assert.equal(health.status, 200);
-  const body = await health.json() as { ok: boolean; journal: string; queue: { inFlight: number } };
+  const body = await health.json() as {
+    ok: boolean;
+    journal: string;
+    queue: { inFlight: number };
+    runs: { byStatus: Record<string, number>; terminalCount: number; averageDurationMs: number | null };
+  };
   assert.equal(body.ok, true);
   assert.equal(body.journal, "ok");
   assert.equal(typeof body.queue.inFlight, "number");
+  assert.equal(typeof body.runs.byStatus.completed, "number");
+  assert.equal(body.runs.terminalCount, 0);
+  assert.equal(body.runs.averageDurationMs, null);
 
   const unauthenticated = await fetch(`${url}/api/runs/missing/approve`, { method: "POST" });
   assert.equal(unauthenticated.status, 401);

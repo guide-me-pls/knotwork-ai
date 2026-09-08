@@ -17,6 +17,7 @@
  */
 import { defaultLegacyDirectory, migrateLegacyCloneHome, prepareCloneHome, resolveClonePaths } from "../config/clone-home.ts";
 import { createMainAgentSession } from "./session.ts";
+import { collectSessionUsage, recordUsage } from "../observability/usage.ts";
 
 const query = process.argv.slice(2).join(" ").trim();
 if (query.length === 0) {
@@ -42,9 +43,23 @@ session.subscribe((event) => {
   }
 });
 
+const started = Date.now();
+const beforeStats = (() => {
+  try {
+    return session.getSessionStats();
+  } catch {
+    return undefined;
+  }
+})();
 try {
   await session.prompt(query);
   process.stdout.write("\n");
 } finally {
+  try {
+    await recordUsage(paths.dataDirectory, collectSessionUsage(session, Date.now() - started, beforeStats));
+  } catch {
+    // Usage is telemetry; losing it must not hide the reply or the error.
+    // 用量是遥测；丢掉它不能盖住回复或错误。
+  }
   session.dispose();
 }
